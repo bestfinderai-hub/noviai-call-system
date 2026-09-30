@@ -1,0 +1,8 @@
+.env
+node_modules/
+*.log
+recordings/
+test-output/
+*.mulaw
+*.wav
+.fly/
