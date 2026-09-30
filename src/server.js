@@ -170,11 +170,23 @@ app.get('/', (_req, res) => {
 });
 
 app.get('/health', (_req, res) => {
+  const mem = process.memoryUsage();
   res.json({
     status: 'ok',
-    activeSessions: sessions.size,
+    version: require('../package.json').version,
     uptime: Math.round(process.uptime()),
     env: process.env.NODE_ENV || 'development',
+    activeSessions: sessions.size,
+    memory: {
+      heapUsedMB: Math.round(mem.heapUsed / 1024 / 1024),
+      heapTotalMB: Math.round(mem.heapTotal / 1024 / 1024),
+      rssMB: Math.round(mem.rss / 1024 / 1024),
+    },
+    features: {
+      sentiment: process.env.SENTIMENT_ENABLED === 'true',
+      recording: process.env.RECORDING_ENABLED === 'true',
+      megaStorage: !!(process.env.MEGA_EMAIL && process.env.MEGA_PASSWORD),
+    },
   });
 });
 
