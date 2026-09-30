@@ -5,3 +5,4 @@ recordings/
 test-output/
 *.mulaw
 *.wav
+.fly/
