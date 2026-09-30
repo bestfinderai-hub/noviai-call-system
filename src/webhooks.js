@@ -215,19 +215,28 @@ async function handleAmdResult(payload, sessions, callMeta) {
 
 async function handleSpeakEnded(payload, sessions, callMeta) {
   const { call_control_id: cid } = payload;
-  if (!_voicemailSpeaking.has(cid)) return;
 
-  _voicemailSpeaking.delete(cid);
-  console.log(`[Webhook] Voicemail message delivered — hanging up: ${cid.slice(-8)}`);
-  await telnyxAction(cid, 'hangup', {});
+  // Voicemail path — hang up after the message plays
+  if (_voicemailSpeaking.has(cid)) {
+    _voicemailSpeaking.delete(cid);
+    console.log(`[Webhook] Voicemail message delivered — hanging up: ${cid.slice(-8)}`);
+    await telnyxAction(cid, 'hangup', {});
+    const session = sessions.get(cid);
+    if (session) {
+      session._hangupCause = 'voicemail_left';
+      session.cleanup();
+      sessions.delete(cid);
+    }
+    if (callMeta) callMeta.delete(cid);
+    return;
+  }
 
+  // Normal conversation path — notify session that Telnyx speak finished
   const session = sessions.get(cid);
   if (session) {
-    session._hangupCause = 'voicemail_left';
-    session.cleanup();
-    sessions.delete(cid);
+    console.log(`[Webhook] call.speak.ended → notifying session: ${cid.slice(-8)}`);
+    session.onSpeakEnded();
   }
-  if (callMeta) callMeta.delete(cid);
 }
 
 // ── Router ────────────────────────────────────────────────────────────────────
