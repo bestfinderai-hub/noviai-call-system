@@ -1,0 +1,6 @@
+.env
+recordings/
+*.log
+node_modules/
+test/
+scripts/
