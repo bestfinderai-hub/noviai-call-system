@@ -78,6 +78,9 @@ async function startAudioStream(cid) {
   return ok;
 }
 
+// Tracks calls where we are actively speaking a voicemail message (wait for speak.ended before hangup)
+const _voicemailSpeaking = new Set();
+
 // ── callMeta helpers ──────────────────────────────────────────────────────────
 
 function storeCallMeta(callMeta, cid, data) {
@@ -180,17 +183,51 @@ async function handleAmdResult(payload, sessions, callMeta) {
   const { call_control_id: cid, result } = payload;
   console.log(`[Webhook] AMD: ${result} — ${cid.slice(-8)}`);
 
-  // "human" = real person answered → proceed normally
   if (!result || result === 'human') return;
 
-  // Any other result (machine_start, machine_end_beep, machine_end_silence, etc.)
-  // means voicemail/IVR — hang up immediately
-  console.log(`[Webhook] AMD non-human (${result}) — hanging up`);
+  const voicemailMsg = process.env.VOICEMAIL_MESSAGE?.trim();
+
+  // machine_end_beep = beep detected → perfect time to leave a voicemail message
+  if (result === 'machine_end_beep' && voicemailMsg) {
+    console.log(`[Webhook] AMD beep — leaving voicemail: ${cid.slice(-8)}`);
+    _voicemailSpeaking.add(cid);
+    const ok = await telnyxAction(cid, 'speak', {
+      payload:      voicemailMsg,
+      payload_type: 'text',
+      voice:        'female',
+      language:     process.env.CALL_LANGUAGE === 'sv' ? 'sv-SE' : 'en-US',
+    });
+    if (!ok) {
+      _voicemailSpeaking.delete(cid);
+      await telnyxAction(cid, 'hangup', {});
+    }
+    // Hang up happens in handleSpeakEnded when Telnyx fires call.speak.ended
+    return;
+  }
+
+  console.log(`[Webhook] AMD non-human (${result}) — hanging up: ${cid.slice(-8)}`);
   await telnyxAction(cid, 'hangup', {});
 
   const session = sessions.get(cid);
   if (session) {
     session._hangupCause = 'voicemail_detected';
+    session.cleanup();
+    sessions.delete(cid);
+  }
+  if (callMeta) callMeta.delete(cid);
+}
+
+async function handleSpeakEnded(payload, sessions, callMeta) {
+  const { call_control_id: cid } = payload;
+  if (!_voicemailSpeaking.has(cid)) return;
+
+  _voicemailSpeaking.delete(cid);
+  console.log(`[Webhook] Voicemail message delivered — hanging up: ${cid.slice(-8)}`);
+  await telnyxAction(cid, 'hangup', {});
+
+  const session = sessions.get(cid);
+  if (session) {
+    session._hangupCause = 'voicemail_left';
     session.cleanup();
     sessions.delete(cid);
   }
@@ -249,6 +286,9 @@ function createWebhookRouter(sessions, callMeta) {
           break;
         case 'call.machine.detection.ended':
           await handleAmdResult(payload, sessions, callMeta);
+          break;
+        case 'call.speak.ended':
+          await handleSpeakEnded(payload, sessions, callMeta);
           break;
         case 'call.streaming.started':
           console.log('[Webhook] Audio streaming confirmed');

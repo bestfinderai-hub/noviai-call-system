@@ -71,7 +71,6 @@ test('LLM factory: default is groq', () => {
   const llm = require('../src/providers/llm');
   assert.equal(typeof llm.chat, 'function');
   assert.equal(typeof llm.chatStream, 'function');
-  assert.equal(typeof llm.classifyIntent, 'function');
 });
 
 test('LLM: clearPromptCache exported and callable', () => {

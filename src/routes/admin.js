@@ -19,6 +19,10 @@
 //   GET  /admin/calls/:callId
 //   POST /admin/calls/:callId/transfer
 //   POST /admin/calls/outbound
+//   POST /admin/batch-calls
+//   GET  /admin/batch-calls
+//   GET  /admin/batch-calls/:batchId
+//   DELETE /admin/batch-calls/:batchId
 
 const express    = require('express');
 const { timingSafeEqual } = require('crypto');
@@ -160,7 +164,7 @@ router.post('/voice', (req, res) => {
 
 // ── POST /admin/providers ─────────────────────────────────────────────────────
 
-const VALID_PROVIDERS = { stt: ['groq', 'deepgram'], llm: ['groq'], tts: VALID_TTS_PROVIDERS };
+const VALID_PROVIDERS = { stt: ['groq', 'deepgram'], llm: ['groq', 'openai'], tts: VALID_TTS_PROVIDERS };
 
 router.post('/providers', (req, res) => {
   const { stt, llm, tts } = req.body || {};
@@ -481,6 +485,50 @@ router.post('/prompt/template', (req, res) => {
   clearPromptCache();
   console.log(`[Admin] Template "${name}" activated as system prompt`);
   res.json({ ok: true, name, chars: content.length, preview: content.slice(0, 100) });
+});
+
+// ── POST /admin/batch-calls ───────────────────────────────────────────────────
+// Start a batch outbound campaign. Returns batchId to poll for status.
+//
+// Body: { numbers: [{to,firstMessage?,variables?},...], concurrency?, delayMs?, name? }
+
+router.post('/batch-calls', async (req, res) => {
+  const { numbers, concurrency, delayMs, name } = req.body || {};
+  if (!Array.isArray(numbers) || numbers.length === 0) {
+    return res.status(400).json({ error: 'numbers: non-empty array of {to,...} required' });
+  }
+  const { startBatch } = require('../features/batch-caller');
+  try {
+    const result = await startBatch({ numbers, concurrency, delayMs, name });
+    res.json({ ok: true, ...result, total: numbers.length });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── GET /admin/batch-calls ────────────────────────────────────────────────────
+
+router.get('/batch-calls', (_req, res) => {
+  const { listBatches } = require('../features/batch-caller');
+  res.json({ batches: listBatches() });
+});
+
+// ── GET /admin/batch-calls/:batchId ──────────────────────────────────────────
+
+router.get('/batch-calls/:batchId', (req, res) => {
+  const { getBatch } = require('../features/batch-caller');
+  const job = getBatch(req.params.batchId?.slice(0, 36));
+  if (!job) return res.status(404).json({ error: 'Batch not found' });
+  res.json(job);
+});
+
+// ── DELETE /admin/batch-calls/:batchId ───────────────────────────────────────
+
+router.delete('/batch-calls/:batchId', (req, res) => {
+  const { cancelBatch } = require('../features/batch-caller');
+  const ok = cancelBatch(req.params.batchId?.slice(0, 36));
+  if (!ok) return res.status(400).json({ error: 'Batch not found or already finished' });
+  res.json({ ok: true, cancelled: true });
 });
 
 module.exports = { router, getConfig: () => ({ ..._config }) };
