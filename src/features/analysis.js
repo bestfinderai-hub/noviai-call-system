@@ -2,24 +2,50 @@
 
 // Post-call analysis — runs a second LLM pass after each call to produce:
 //   summary          : 2-3 sentence plain text summary
-//   structuredData   : JSON matching NOVA_ANALYSIS_SCHEMA (if configured)
+//   structuredData   : JSON with outcome, sentiment, booked status, objections etc.
 //   successEvaluation: "success" | "failure" | "unknown" (if NOVA_SUCCESS_RUBRIC set)
 //
-// Non-blocking — called from call-report.js, failures are logged but not rethrown.
+// Runs by default on every call. Override schema via NOVA_ANALYSIS_SCHEMA.
 
 const { chat } = require('../providers/llm');
+
+// ── Default schema — always runs ──────────────────────────────────────────────
+
+const DEFAULT_ANALYSIS_SCHEMA = {
+  type: 'object',
+  properties: {
+    outcome: {
+      type: 'string',
+      enum: ['booked', 'callback_requested', 'not_interested', 'info_given',
+             'transferred', 'voicemail_detected', 'error', 'unknown'],
+    },
+    booked:          { type: 'boolean' },
+    booking_date:    { type: 'string' },
+    customer_name:   { type: 'string' },
+    customer_phone:  { type: 'string' },
+    main_objection: {
+      type: 'string',
+      enum: ['price', 'time', 'competitor', 'not_interested',
+             'not_decision_maker', 'none', 'unknown'],
+    },
+    sentiment_score: { type: 'integer', minimum: 1, maximum: 10 },
+    sentiment_label: { type: 'string', enum: ['positive', 'neutral', 'negative'] },
+    key_info:        { type: 'string' },
+  },
+  required: ['outcome', 'booked', 'sentiment_score', 'sentiment_label'],
+};
 
 // ── Config loading ─────────────────────────────────────────────────────────────
 
 function loadAnalysisConfig(override = {}) {
-  let structuredSchema = null;
+  let structuredSchema = DEFAULT_ANALYSIS_SCHEMA;
   let successRubric = null;
 
   if (process.env.NOVA_ANALYSIS_SCHEMA) {
     try {
       structuredSchema = JSON.parse(process.env.NOVA_ANALYSIS_SCHEMA);
     } catch {
-      console.warn('[Analysis] Invalid NOVA_ANALYSIS_SCHEMA JSON — skipping extraction');
+      console.warn('[Analysis] Invalid NOVA_ANALYSIS_SCHEMA JSON — using default schema');
     }
   }
 
@@ -28,9 +54,9 @@ function loadAnalysisConfig(override = {}) {
   }
 
   return {
-    summary: override.summary !== false,
+    summary:         override.summary         !== false,
     structuredSchema: override.structuredSchema ?? structuredSchema,
-    successRubric: override.successRubric ?? successRubric,
+    successRubric:   override.successRubric   ?? successRubric,
   };
 }
 
@@ -39,7 +65,7 @@ function loadAnalysisConfig(override = {}) {
 function formatTranscript(history) {
   return (history || [])
     .filter(m => m.role === 'user' || m.role === 'assistant')
-    .map(m => `${m.role === 'user' ? 'Kund' : 'Sofia'}: ${m.content}`)
+    .map(m => `${m.role === 'user' ? 'Kund' : 'Agent'}: ${m.content}`)
     .join('\n');
 }
 
@@ -62,26 +88,28 @@ async function analyzeCall(history, configOverride = {}) {
     const schemaStr = JSON.stringify(cfg.structuredSchema, null, 2);
     tasks.push(
       `STRUKTURERAD_DATA: Extrahera data enligt detta JSON-schema.\n` +
-      `Returnera EXAKT giltig JSON och inget annat. Sätt null för fält som saknas.\n` +
+      `Returnera EXAKT giltig JSON. Sätt null för fält du inte kan avgöra.\n` +
       `Schema:\n${schemaStr}`,
     );
   }
 
   if (cfg.successRubric) {
     tasks.push(
-      `BEDÖMNING: Utvärdera om samtalet lyckades. Rubrik: "${cfg.successRubric}"\n` +
+      `BEDÖMNING: Utvärdera om samtalet lyckades.\nRubrik: "${cfg.successRubric}"\n` +
       `Svara med EXAKT ett av dessa ord: success | failure | unknown`,
     );
   }
 
   if (tasks.length === 0) return null;
 
-  const userMessage = `TRANSKRIPT:\n${transcript}\n\nUPPGIFTER:\n${tasks.map((t, i) => `${i + 1}. ${t}`).join('\n\n')}`;
+  const userMessage =
+    `TRANSKRIPT:\n${transcript}\n\n` +
+    `UPPGIFTER:\n${tasks.map((t, i) => `${i + 1}. ${t}`).join('\n\n')}`;
 
   try {
     const response = await chat(
       [{ role: 'user', content: userMessage }],
-      'Du är ett precist analyssystem. Följ formaten exakt. Svara alltid på svenska.',
+      'Du är ett precist analyssystem för telefonsamtal. Följ formaten exakt. Svara alltid på svenska.',
     );
 
     return parseAnalysisResponse(response, cfg);
@@ -97,26 +125,21 @@ function parseAnalysisResponse(text, cfg) {
   const result = {};
 
   if (cfg.summary) {
-    const m = text.match(/SAMMANFATTNING:\s*([\s\S]+?)(?=\n[A-ZÅÄÖ_]+:|$)/);
+    const m = text.match(/SAMMANFATTNING:\s*([\s\S]+?)(?=\n\d+\.|$)/);
     result.summary = m ? m[1].trim() : text.split('\n')[0]?.trim() || null;
   }
 
   if (cfg.structuredSchema) {
-    const m = text.match(/STRUKTURERAD_DATA:\s*(\{[\s\S]*?\})\s*(?=\n[A-ZÅÄÖ_]+:|$)/);
+    // Try labelled block first
+    const m = text.match(/STRUKTURERAD_DATA:\s*(\{[\s\S]*?\})\s*(?=\n\d+\.|$)/);
     if (m) {
       try {
         result.structuredData = JSON.parse(m[1]);
       } catch {
-        // Try to find any JSON object in the text as fallback
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          try { result.structuredData = JSON.parse(jsonMatch[0]); } catch { result.structuredData = null; }
-        } else {
-          result.structuredData = null;
-        }
+        result.structuredData = _tryExtractJson(text);
       }
     } else {
-      result.structuredData = null;
+      result.structuredData = _tryExtractJson(text);
     }
   }
 
@@ -126,6 +149,12 @@ function parseAnalysisResponse(text, cfg) {
   }
 
   return Object.keys(result).length > 0 ? result : null;
+}
+
+function _tryExtractJson(text) {
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try { return JSON.parse(m[0]); } catch { return null; }
 }
 
 module.exports = { analyzeCall };
