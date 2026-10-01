@@ -44,7 +44,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 #login-error{color:var(--red);font-size:12px;margin-top:10px;display:none}
 
 /* ── App shell ── */
-#app{display:none;height:100vh;display:none;flex-direction:row}
+#app{height:100vh;display:none;flex-direction:row}
 #app.visible{display:flex}
 
 /* ── Sidebar ── */
@@ -167,13 +167,13 @@ tr:hover td{background:rgba(255,255,255,.02)}
 <div id="app">
   <div id="sidebar">
     <div class="sidebar-logo">Nov<span>AI</span></div>
-    <div class="nav-item active" onclick="nav('overview')"><span class="nav-icon">⚡</span> Översikt</div>
-    <div class="nav-item" onclick="nav('prompt')"><span class="nav-icon">✍️</span> System Prompt</div>
-    <div class="nav-item" onclick="nav('voice')"><span class="nav-icon">🎙️</span> Röst & Providers</div>
-    <div class="nav-item" onclick="nav('settings')"><span class="nav-icon">⚙️</span> Inställningar</div>
-    <div class="nav-item" onclick="nav('calls')"><span class="nav-icon">📞</span> Samtal</div>
-    <div class="nav-item" onclick="nav('stats')"><span class="nav-icon">📊</span> Statistik</div>
-    <div class="nav-item" onclick="nav('outbound')"><span class="nav-icon">📤</span> Ring ut</div>
+    <div class="nav-item active" onclick="nav('overview',this)"><span class="nav-icon">⚡</span> Översikt</div>
+    <div class="nav-item" onclick="nav('prompt',this)"><span class="nav-icon">✍️</span> System Prompt</div>
+    <div class="nav-item" onclick="nav('voice',this)"><span class="nav-icon">🎙️</span> Röst & Providers</div>
+    <div class="nav-item" onclick="nav('settings',this)"><span class="nav-icon">⚙️</span> Inställningar</div>
+    <div class="nav-item" onclick="nav('calls',this)"><span class="nav-icon">📞</span> Samtal</div>
+    <div class="nav-item" onclick="nav('stats',this)"><span class="nav-icon">📊</span> Statistik</div>
+    <div class="nav-item" onclick="nav('outbound',this)"><span class="nav-icon">📤</span> Ring ut</div>
     <div class="sidebar-bottom">
       <button class="logout-btn" onclick="logout()">Logga ut</button>
     </div>
@@ -507,11 +507,11 @@ window.addEventListener('load', () => {
 });
 
 // ── Navigation ─────────────────────────────────────────────────────────────
-function nav(id) {
+function nav(id, el) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-' + id).classList.add('active');
-  event.currentTarget.classList.add('active');
+  el.classList.add('active');
   if (id === 'calls') loadCalls();
   if (id === 'stats') loadStats();
 }
@@ -648,7 +648,10 @@ async function saveProviders() {
 async function saveSettings() {
   const body = {
     vadSilenceMs:     parseInt(document.getElementById('s-vad').value),
+    maxCallDuration:  parseInt(document.getElementById('s-maxdur').value),
+    maxTokensLlm:     parseInt(document.getElementById('s-maxtok').value),
     firstMessageMode: document.getElementById('s-firstmsg').value,
+    language:         document.getElementById('s-lang').value,
   };
   const r = await api('/admin/settings', 'POST', body);
   if (r?.ok) showStatus('settings-status');
@@ -691,8 +694,8 @@ async function loadCalls() {
     const hasTranscript = c.id ? 'onclick="loadTranscript(' + "'" + c.call_id + "'" + ')"' : '';
     return \`<tr>
       <td>\${dateStr}</td>
-      <td style="font-family:monospace">\${c.phone_from||'—'}</td>
-      <td style="font-family:monospace">\${c.phone_to||'—'}</td>
+      <td style="font-family:monospace">\${esc(c.phone_from||'—')}</td>
+      <td style="font-family:monospace">\${esc(c.phone_to||'—')}</td>
       <td>\${dir}</td>
       <td>\${dur}</td>
       <td>\${c.turn_count??'—'}</td>
