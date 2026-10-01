@@ -53,6 +53,7 @@ async function telnyxAction(callControlId, action, body = {}) {
     method: 'POST',
     headers: telnyxHeaders(),
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
