@@ -43,8 +43,9 @@ function addNaturalPauses(text) {
   // Em-dash pause
   t = t.replace(/\s*—\s*/g, '<break time="250ms"/> ');
 
-  // Sentence-ending pauses (period, ! or ? followed by a space/EOL)
-  t = t.replace(/([.!?])\s+/g, '$1<break time="350ms"/> ');
+  // Sentence-ending pauses — only when followed by uppercase or end of string.
+  // Avoids breaking Swedish abbreviations: "t.ex. " "bl.a. " "dvs. " "m.m. "
+  t = t.replace(/([.!?])(\s+)(?=[A-ZÅÄÖ"]|$)/g, '$1<break time="350ms"/> ');
 
   // Comma pauses
   t = t.replace(/,\s+/g, ',<break time="150ms"/> ');
