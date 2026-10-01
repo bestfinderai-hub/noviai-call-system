@@ -421,7 +421,9 @@ class CallSession extends EventEmitter {
     const { promise, cancel, byteLength } = streamToWebSocket(text, this.ws);
     this._cancelTts = cancel;
 
-    const playbackMs = byteLength ? Math.ceil(byteLength / 8) + 5000 : 10000;
+    // byteLength is a getter that accumulates during streaming, so it's 0 at this point.
+    // Estimate from text length: ~65ms per char for Edge TTS at 8kHz mulaw.
+    const playbackMs = Math.ceil(text.length * 65) + 5000;
     const fallbackTimer = setTimeout(() => {
       if (this.state === 'speaking') {
         console.warn(`[Session:${this._id()}] Mark echo timeout — forcing idle`);
