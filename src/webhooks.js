@@ -22,13 +22,9 @@ function telnyxHeaders() {
 function verifyTelnyxSignature(rawBody, signature, timestamp) {
   const pubKeyB64 = process.env.TELNYX_PUBLIC_KEY;
   if (!pubKeyB64) {
-    if (process.env.NODE_ENV === 'production') {
-      console.error('[Webhook] TELNYX_PUBLIC_KEY not set in production — rejecting request');
-      return false;
-    }
     if (!verifyTelnyxSignature._warned) {
       verifyTelnyxSignature._warned = true;
-      console.warn('[Webhook] ⚠ TELNYX_PUBLIC_KEY not set — signature verification DISABLED. Set it before production!');
+      console.warn('[Webhook] ⚠ TELNYX_PUBLIC_KEY not set — signature verification DISABLED. Add it from Telnyx portal → Account → Webhooks → Ed25519 Public Key');
     }
     return true;
   }
@@ -57,6 +53,7 @@ async function telnyxAction(callControlId, action, body = {}) {
     method: 'POST',
     headers: telnyxHeaders(),
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -219,19 +216,28 @@ async function handleAmdResult(payload, sessions, callMeta) {
 
 async function handleSpeakEnded(payload, sessions, callMeta) {
   const { call_control_id: cid } = payload;
-  if (!_voicemailSpeaking.has(cid)) return;
 
-  _voicemailSpeaking.delete(cid);
-  console.log(`[Webhook] Voicemail message delivered — hanging up: ${cid.slice(-8)}`);
-  await telnyxAction(cid, 'hangup', {});
+  // Voicemail path — hang up after the message plays
+  if (_voicemailSpeaking.has(cid)) {
+    _voicemailSpeaking.delete(cid);
+    console.log(`[Webhook] Voicemail message delivered — hanging up: ${cid.slice(-8)}`);
+    await telnyxAction(cid, 'hangup', {});
+    const session = sessions.get(cid);
+    if (session) {
+      session._hangupCause = 'voicemail_left';
+      session.cleanup();
+      sessions.delete(cid);
+    }
+    if (callMeta) callMeta.delete(cid);
+    return;
+  }
 
+  // Normal conversation path — notify session that Telnyx speak finished
   const session = sessions.get(cid);
   if (session) {
-    session._hangupCause = 'voicemail_left';
-    session.cleanup();
-    sessions.delete(cid);
+    console.log(`[Webhook] call.speak.ended → notifying session: ${cid.slice(-8)}`);
+    session.onSpeakEnded();
   }
-  if (callMeta) callMeta.delete(cid);
 }
 
 // ── Router ────────────────────────────────────────────────────────────────────

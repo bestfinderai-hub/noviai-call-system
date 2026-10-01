@@ -56,6 +56,7 @@ class CallSession extends EventEmitter {
     this._hangupCause  = 'normal_clearing';
 
     this._cancelTts       = null;
+    this._speakResolve    = null;  // resolve fn for Telnyx-speak fallback
     this._ivrTurnsChecked = 0;   // check first 3 real turns for IVR/voicemail
     this._cleaned         = false; // guard against double cleanup
 
@@ -407,19 +408,81 @@ class CallSession extends EventEmitter {
       }
     }, playbackMs);
 
+    let streamFailed = false;
     try {
       await promise;
     } catch (err) {
       if (err.message !== 'cancelled') {
-        console.error(`[Session:${this._id()}] TTS error:`, err.message);
+        console.error(`[Session:${this._id()}] TTS stream error:`, err.message);
+        streamFailed = true;
       }
     } finally {
       clearTimeout(fallbackTimer);
       this._cancelTts = null;
-      // Note: _startIdleTimer is called from handleMark('tts_end')
-      // The fallback above handles the case where mark never arrives.
-      if (this.state === 'speaking') this.state = 'idle';
+    }
+
+    // ── Telnyx-speak fallback — fires when Edge TTS produced 0 audio bytes ────
+    if (byteLength === 0 && !streamFailed && this.state === 'speaking') {
+      console.warn(`[Session:${this._id()}] Edge TTS produced 0 bytes — falling back to Telnyx speak`);
+      await this._speakViaTelnyx(text);
+      return;
+    }
+
+    // Note: _startIdleTimer is called from handleMark('tts_end').
+    // The fallback timer above handles the case where the mark never arrives.
+    if (this.state === 'speaking') this.state = 'idle';
+    this.audioChunks = [];
+  }
+
+  // Telnyx-native TTS fallback (REST action — no Edge TTS / ffmpeg needed)
+  async _speakViaTelnyx(text) {
+    const lang = process.env.CALL_LANGUAGE === 'sv' ? 'sv-SE' : (process.env.TELNYX_TTS_LANGUAGE || 'sv-SE');
+    const ok = await telnyxAction(this.callControlId, 'speak', {
+      payload:      text,
+      payload_type: 'text',
+      voice:        'female',
+      language:     lang,
+    });
+
+    if (!ok) {
+      console.error(`[Session:${this._id()}] Telnyx speak action failed`);
+      this.state = 'idle';
       this.audioChunks = [];
+      this._startIdleTimer();
+      return;
+    }
+
+    // Wait for call.speak.ended webhook → resolves _speakResolve
+    await new Promise(resolve => {
+      this._speakResolve = resolve;
+      // Safety timeout: force idle if webhook never arrives
+      setTimeout(() => {
+        if (this._speakResolve === resolve) {
+          this._speakResolve = null;
+          console.warn(`[Session:${this._id()}] Telnyx speak ended timeout`);
+          resolve();
+        }
+      }, 30_000);
+    });
+
+    this.state = 'idle';
+    this.audioChunks = [];
+    this._startIdleTimer();
+  }
+
+  // Called by webhook handler when call.speak.ended fires (non-voicemail)
+  onSpeakEnded() {
+    if (this._speakResolve) {
+      const resolve = this._speakResolve;
+      this._speakResolve = null;
+      resolve();
+    } else {
+      // Speak ended but no pending promise — safe to ignore
+      if (this.state === 'speaking') {
+        this.state = 'idle';
+        this.audioChunks = [];
+        this._startIdleTimer();
+      }
     }
   }
 

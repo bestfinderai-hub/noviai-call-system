@@ -11,6 +11,7 @@ const { CallSession } = require('./call-session');
 const { warmup: warmupTts } = require('./services/tts');
 const { initSchema } = require('./db');
 const { router: adminRouter } = require('./routes/admin');
+const { router: dashboardRouter } = require('./routes/dashboard');
 
 // ── App setup ────────────────────────────────────────────────────────────────
 
@@ -118,6 +119,7 @@ server.on('upgrade', (req, socket, head) => {
 
 app.use('/webhooks/telnyx', createWebhookRouter(sessions, callMeta));
 app.use('/admin', adminRouter);
+app.use('/dashboard', dashboardRouter);
 
 // Root status page
 app.get('/', (_req, res) => {
