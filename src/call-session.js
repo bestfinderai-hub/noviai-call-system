@@ -22,6 +22,12 @@ const ENERGY_THRESHOLD       = 8000;
 const MAX_HISTORY_PAIRS      = 20;
 const MAX_RECORDING_BUFFER   = 5000; // ~10 min at 8 kHz mulaw (prevents memory leak)
 
+// Barge-in requires this many consecutive high-energy chunks to prevent
+// "mm" / "ja" backchannels from interrupting the AI mid-sentence.
+const MIN_BARGEIN_CHUNKS     = 4;   // 4 × 20 ms = 80 ms of actual speech
+// After AI finishes speaking, ignore user audio for this long (prevents echo/feedback).
+const BARGEIN_BACKOFF_MS     = 350;
+
 class CallSession extends EventEmitter {
   /**
    * @param {string} callControlId
@@ -59,6 +65,11 @@ class CallSession extends EventEmitter {
     this._speakResolve    = null;  // resolve fn for Telnyx-speak fallback
     this._ivrTurnsChecked = 0;   // check first 3 real turns for IVR/voicemail
     this._cleaned         = false; // guard against double cleanup
+
+    // Barge-in quality gate — consecutive high-energy chunk counter
+    this._bargeinCount    = 0;
+    // Timestamp when AI last finished speaking — used for BARGEIN_BACKOFF_MS
+    this._speakEndedAt    = 0;
 
     // Sentiment tracking
     this.sentimentHistory = [];
@@ -125,10 +136,20 @@ class CallSession extends EventEmitter {
       if (this.state === 'speaking') {
         const energy = mulawEnergy(base64Payload);
         if (energy > ENERGY_THRESHOLD * 2) {
-          this._handleBargein(base64Payload);
-          return;
+          this._bargeinCount++;
+          if (this._bargeinCount >= MIN_BARGEIN_CHUNKS) {
+            this._bargeinCount = 0;
+            this._handleBargein(base64Payload);
+          }
+        } else {
+          this._bargeinCount = 0; // reset on silence — must be consecutive
         }
       }
+      return;
+    }
+
+    // Post-speech backoff: ignore audio briefly after AI finishes talking
+    if (this._speakEndedAt && Date.now() - this._speakEndedAt < BARGEIN_BACKOFF_MS) {
       return;
     }
 
@@ -189,6 +210,8 @@ class CallSession extends EventEmitter {
 
   handleMark(name) {
     if (name === 'tts_end' && this.state === 'speaking') {
+      this._speakEndedAt = Date.now(); // start backoff window
+      this._bargeinCount = 0;
       this.state = 'idle';
       this.audioChunks = [];
       this._startIdleTimer();
