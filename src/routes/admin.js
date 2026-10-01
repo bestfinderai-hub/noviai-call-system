@@ -237,6 +237,28 @@ router.post('/settings', (req, res) => {
     changed.vadSilenceMs = v;
   }
 
+  if (body.maxCallDuration !== undefined) {
+    const v = parseInt(body.maxCallDuration, 10);
+    if (isNaN(v) || v < 30 || v > 3600) return res.status(400).json({ error: 'maxCallDuration: 30-3600' });
+    process.env.MAX_CALL_DURATION = String(v);
+    changed.maxCallDuration = v;
+  }
+
+  if (body.maxTokensLlm !== undefined) {
+    const v = parseInt(body.maxTokensLlm, 10);
+    if (isNaN(v) || v < 50 || v > 2000) return res.status(400).json({ error: 'maxTokensLlm: 50-2000' });
+    process.env.MAX_TOKENS_LLM = String(v);
+    changed.maxTokensLlm = v;
+  }
+
+  if (body.language !== undefined) {
+    if (typeof body.language !== 'string' || !/^[a-z]{2}$/.test(body.language)) {
+      return res.status(400).json({ error: 'language: 2-letter code (sv, en)' });
+    }
+    process.env.CALL_LANGUAGE = body.language;
+    changed.language = body.language;
+  }
+
   if (Object.keys(changed).length === 0) {
     return res.status(400).json({ error: 'No valid settings provided' });
   }
