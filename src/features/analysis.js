@@ -85,7 +85,7 @@ async function analyzeCall(history, configOverride = {}) {
   }
 
   if (cfg.structuredSchema) {
-    const schemaStr = JSON.stringify(cfg.structuredSchema, null, 2);
+    const schemaStr = JSON.stringify(cfg.structuredSchema);
     tasks.push(
       `STRUKTURERAD_DATA: Extrahera data enligt detta JSON-schema.\n` +
       `Returnera EXAKT giltig JSON. Sätt null för fält du inte kan avgöra.\n` +
@@ -107,9 +107,11 @@ async function analyzeCall(history, configOverride = {}) {
     `UPPGIFTER:\n${tasks.map((t, i) => `${i + 1}. ${t}`).join('\n\n')}`;
 
   try {
+    const maxTok = parseInt(process.env.MAX_TOKENS_ANALYSIS || '600', 10);
     const response = await chat(
       [{ role: 'user', content: userMessage }],
       'Du är ett precist analyssystem för telefonsamtal. Följ formaten exakt. Svara alltid på svenska.',
+      { maxTokens: maxTok, temperature: 0.2 },
     );
 
     return parseAnalysisResponse(response, cfg);
@@ -130,8 +132,8 @@ function parseAnalysisResponse(text, cfg) {
   }
 
   if (cfg.structuredSchema) {
-    // Try labelled block first
-    const m = text.match(/STRUKTURERAD_DATA:\s*(\{[\s\S]*?\})\s*(?=\n\d+\.|$)/);
+    // Greedy match — handles nested JSON correctly
+    const m = text.match(/STRUKTURERAD_DATA:\s*(\{[\s\S]*\})\s*(?=\n\d+\.|$)/);
     if (m) {
       try {
         result.structuredData = JSON.parse(m[1]);
