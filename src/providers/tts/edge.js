@@ -6,19 +6,23 @@ const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 const { spawn }    = require('child_process');
 const ffmpegPath   = require('ffmpeg-static');
 const WebSocket    = require('ws');
-const { prepareForTts } = require('../../services/speech');
+const { addNaturalPauses } = require('../../services/speech');
 
 const VOICE  = () => process.env.TTS_VOICE  || 'sv-SE-SofieNeural';
 const FORMAT = OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3;
 
 let _tts = null;
+let _activeVoice = null;
 
 async function _ensureReady() {
-  if (_tts) return _tts;
+  const voice = VOICE();
+  // Re-init if voice changed at runtime (e.g. via admin API PATCH /admin/settings)
+  if (_tts && _activeVoice === voice) return _tts;
   const tts = new MsEdgeTTS();
-  await tts.setMetadata(VOICE(), FORMAT, {});
+  await tts.setMetadata(voice, FORMAT, {});
   _tts = tts;
-  console.log('[TTS:edge] Ready — voice:', VOICE(), '| ffmpeg:', ffmpegPath);
+  _activeVoice = voice;
+  console.log('[TTS:edge] Ready — voice:', voice, '| ffmpeg:', ffmpegPath);
   return tts;
 }
 
@@ -44,9 +48,9 @@ function streamToWebSocket(text, telnyxWs) {
     await prev;
     if (cancelled) return;
 
-    // Preprocess: strip markdown + inject SSML natural pauses
-    const prepared = prepareForTts(text, { ssml: true });
-    console.log(`[TTS:edge] Synthesizing (${text.length} chars): "${text.slice(0, 60)}"`);
+    // Markdown is already stripped by tts/index.js — add SSML pauses here (Edge-specific)
+    const prepared = addNaturalPauses(text);
+    console.log(`[TTS:edge] Synthesizing (${prepared.length} chars, raw=${text.length}): "${text.slice(0, 60)}"`);
 
     // ── 1. Ensure TTS is ready ─────────────────────────────────────────────────
     let tts;
