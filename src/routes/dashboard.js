@@ -216,7 +216,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <div class="card-title">Aktiv Prompt</div>
         <textarea class="prompt-area" id="prompt-text" placeholder="Du är Sofia, NovAI:s receptionist..."></textarea>
         <div class="save-row">
-          <button class="btn btn-primary" onclick="savePrompt()">💾 Spara prompt</button>
+          <button class="btn btn-primary" onclick="savePrompt(this)">💾 Spara prompt</button>
           <span class="save-status" id="prompt-status">✓ Sparad</span>
         </div>
       </div>
@@ -225,7 +225,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
         <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Det första AI:n säger när ett samtal besvaras.</p>
         <input type="text" id="greeting-text" placeholder="NovAI, det här är Sofia, hur kan jag hjälpa dig?">
         <div class="save-row">
-          <button class="btn btn-primary" onclick="saveGreeting()">💾 Spara hälsning</button>
+          <button class="btn btn-primary" onclick="saveGreeting(this)">💾 Spara hälsning</button>
           <span class="save-status" id="greeting-status">✓ Sparad</span>
         </div>
       </div>
@@ -257,7 +257,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
           </div>
         </div>
         <div class="save-row">
-          <button class="btn btn-primary" onclick="saveVoice()">💾 Spara röst</button>
+          <button class="btn btn-primary" onclick="saveVoice(this)">💾 Spara röst</button>
           <span class="save-status" id="voice-status">✓ Sparad</span>
         </div>
       </div>
@@ -280,7 +280,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
           </div>
         </div>
         <div class="save-row">
-          <button class="btn btn-primary" onclick="saveProviders()">💾 Spara providers</button>
+          <button class="btn btn-primary" onclick="saveProviders(this)">💾 Spara providers</button>
           <span class="save-status" id="providers-status">✓ Sparad</span>
         </div>
       </div>
@@ -324,7 +324,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
           </div>
         </div>
         <div class="save-row">
-          <button class="btn btn-primary" onclick="saveSettings()">💾 Spara inställningar</button>
+          <button class="btn btn-primary" onclick="saveSettings(this)">💾 Spara inställningar</button>
           <span class="save-status" id="settings-status">✓ Sparad</span>
         </div>
       </div>
@@ -351,7 +351,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
           </div>
         </div>
         <div class="save-row">
-          <button class="btn btn-primary" onclick="saveIdle()">💾 Spara timeouts</button>
+          <button class="btn btn-primary" onclick="saveIdle(this)">💾 Spara timeouts</button>
           <span class="save-status" id="idle-status">✓ Sparad</span>
         </div>
       </div>
@@ -431,7 +431,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
           <input type="text" id="ob-vars" placeholder='{"company":"Acme AB","name":"Anna"}'>
         </div>
         <div class="save-row">
-          <button class="btn btn-green" onclick="makeCall()">📞 Ring nu</button>
+          <button class="btn btn-green" onclick="makeCall(this)">📞 Ring nu</button>
           <span class="save-status" id="ob-status"></span>
         </div>
       </div>
@@ -450,7 +450,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
           </div>
         </div>
         <div class="save-row">
-          <button class="btn btn-green" onclick="startBatch()">🚀 Starta kampanj</button>
+          <button class="btn btn-green" onclick="startBatch(this)">🚀 Starta kampanj</button>
           <span class="save-status" id="batch-status"></span>
         </div>
       </div>
@@ -520,9 +520,13 @@ function nav(id, el) {
 async function api(path, method = 'GET', body = null) {
   const opts = { method, headers: { Authorization: 'Bearer ' + TOKEN } };
   if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-  const res = await fetch(BASE + path, opts);
-  if (!res.ok && res.status === 401) { logout(); return null; }
-  return res.json().catch(() => null);
+  try {
+    const res = await fetch(BASE + path, opts);
+    if (!res.ok && res.status === 401) { logout(); return null; }
+    return res.json().catch(() => null);
+  } catch {
+    return { _networkError: true };
+  }
 }
 
 function showStatus(id, msg = '✓ Sparad', color = 'var(--green)') {
@@ -531,6 +535,13 @@ function showStatus(id, msg = '✓ Sparad', color = 'var(--green)') {
   el.style.color = color;
   el.classList.add('show');
   setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+async function withLoading(btn, fn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Sparar...';
+  try { await fn(); } finally { btn.disabled = false; btn.innerHTML = orig; }
 }
 
 // ── Overview ─────────────────────────────────────────────────────────────────
@@ -585,26 +596,34 @@ async function loadConfig() {
   document.getElementById('s-maxdur').value   = s.maxCallDuration;
   document.getElementById('s-maxtok').value   = s.maxTokensLlm;
   document.getElementById('s-firstmsg').value = s.firstMessageMode;
+  document.getElementById('s-lang').value     = s.language || 'sv';
   document.getElementById('s-idle1').value    = s.idleTimeout1Ms;
   document.getElementById('s-idle2').value    = s.idleTimeout2Ms;
   document.getElementById('s-idle1msg').value = s.idleMessage1 || '';
+  document.getElementById('s-idle2msg').value = s.idleMessage2 || '';
 }
 
 // ── Prompt ────────────────────────────────────────────────────────────────────
-async function savePrompt() {
+async function savePrompt(btn) {
   const prompt = document.getElementById('prompt-text').value.trim();
   if (!prompt) { showStatus('prompt-status', '⚠ Tom prompt', 'var(--yellow)'); return; }
-  const r = await api('/admin/prompt', 'POST', { prompt });
-  if (r?.ok) showStatus('prompt-status');
-  else showStatus('prompt-status', '✗ Fel: ' + (r?.error || 'okänt'), 'var(--red)');
+  await withLoading(btn, async () => {
+    const r = await api('/admin/prompt', 'POST', { prompt });
+    if (r?._networkError) showStatus('prompt-status', '✗ Servern svarar inte', 'var(--red)');
+    else if (r?.ok) showStatus('prompt-status');
+    else showStatus('prompt-status', '✗ ' + (r?.error || 'okänt'), 'var(--red)');
+  });
 }
 
-async function saveGreeting() {
+async function saveGreeting(btn) {
   const greeting = document.getElementById('greeting-text').value.trim();
   if (!greeting) return;
-  const r = await api('/admin/greeting', 'POST', { greeting });
-  if (r?.ok) showStatus('greeting-status');
-  else showStatus('greeting-status', '✗ Fel: ' + (r?.error || 'okänt'), 'var(--red)');
+  await withLoading(btn, async () => {
+    const r = await api('/admin/greeting', 'POST', { greeting });
+    if (r?._networkError) showStatus('greeting-status', '✗ Servern svarar inte', 'var(--red)');
+    else if (r?.ok) showStatus('greeting-status');
+    else showStatus('greeting-status', '✗ ' + (r?.error || 'okänt'), 'var(--red)');
+  });
 }
 
 // ── Voice ─────────────────────────────────────────────────────────────────────
@@ -627,25 +646,31 @@ function syncVoiceInput() {
   if (sel.value !== 'custom') document.getElementById('tts-voice').value = sel.value;
 }
 
-async function saveVoice() {
+async function saveVoice(btn) {
   const voice    = document.getElementById('tts-voice').value.trim();
   const provider = document.getElementById('tts-provider').value;
   if (!voice) return;
-  const r = await api('/admin/voice', 'POST', { voice, provider });
-  if (r?.ok) showStatus('voice-status');
-  else showStatus('voice-status', '✗ Fel: ' + (r?.error || 'okänt'), 'var(--red)');
+  await withLoading(btn, async () => {
+    const r = await api('/admin/voice', 'POST', { voice, provider });
+    if (r?._networkError) showStatus('voice-status', '✗ Servern svarar inte', 'var(--red)');
+    else if (r?.ok) showStatus('voice-status');
+    else showStatus('voice-status', '✗ ' + (r?.error || 'okänt'), 'var(--red)');
+  });
 }
 
-async function saveProviders() {
+async function saveProviders(btn) {
   const stt = document.getElementById('stt-provider').value;
   const llm = document.getElementById('llm-provider').value;
-  const r = await api('/admin/providers', 'POST', { stt, llm });
-  if (r?.ok) showStatus('providers-status');
-  else showStatus('providers-status', '✗ Fel: ' + (r?.error || 'okänt'), 'var(--red)');
+  await withLoading(btn, async () => {
+    const r = await api('/admin/providers', 'POST', { stt, llm });
+    if (r?._networkError) showStatus('providers-status', '✗ Servern svarar inte', 'var(--red)');
+    else if (r?.ok) showStatus('providers-status');
+    else showStatus('providers-status', '✗ ' + (r?.error || 'okänt'), 'var(--red)');
+  });
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
-async function saveSettings() {
+async function saveSettings(btn) {
   const body = {
     vadSilenceMs:     parseInt(document.getElementById('s-vad').value),
     maxCallDuration:  parseInt(document.getElementById('s-maxdur').value),
@@ -653,21 +678,27 @@ async function saveSettings() {
     firstMessageMode: document.getElementById('s-firstmsg').value,
     language:         document.getElementById('s-lang').value,
   };
-  const r = await api('/admin/settings', 'POST', body);
-  if (r?.ok) showStatus('settings-status');
-  else showStatus('settings-status', '✗ Fel: ' + (r?.error || 'okänt'), 'var(--red)');
+  await withLoading(btn, async () => {
+    const r = await api('/admin/settings', 'POST', body);
+    if (r?._networkError) showStatus('settings-status', '✗ Servern svarar inte', 'var(--red)');
+    else if (r?.ok) showStatus('settings-status');
+    else showStatus('settings-status', '✗ ' + (r?.error || 'okänt'), 'var(--red)');
+  });
 }
 
-async function saveIdle() {
+async function saveIdle(btn) {
   const body = {
     idleTimeout1Ms: parseInt(document.getElementById('s-idle1').value),
     idleTimeout2Ms: parseInt(document.getElementById('s-idle2').value),
     idleMessage1:   document.getElementById('s-idle1msg').value,
     idleMessage2:   document.getElementById('s-idle2msg').value,
   };
-  const r = await api('/admin/settings', 'POST', body);
-  if (r?.ok) showStatus('idle-status');
-  else showStatus('idle-status', '✗ Fel: ' + (r?.error || 'okänt'), 'var(--red)');
+  await withLoading(btn, async () => {
+    const r = await api('/admin/settings', 'POST', body);
+    if (r?._networkError) showStatus('idle-status', '✗ Servern svarar inte', 'var(--red)');
+    else if (r?.ok) showStatus('idle-status');
+    else showStatus('idle-status', '✗ ' + (r?.error || 'okänt'), 'var(--red)');
+  });
 }
 
 // ── Calls ─────────────────────────────────────────────────────────────────────
@@ -678,7 +709,11 @@ async function loadCalls() {
   document.getElementById('calls-ts').textContent = 'Uppdaterad ' + new Date().toLocaleTimeString('sv-SE');
 
   const tbody = document.getElementById('calls-body');
-  if (!r || !r.calls.length) {
+  if (!r) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--red);padding:32px">⚠ Kunde inte hämta samtal — servern svarar inte</td></tr>';
+    return;
+  }
+  if (!r.calls.length) {
     tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:32px">Inga samtal hittades</td></tr>';
     return;
   }
@@ -726,6 +761,7 @@ async function loadTranscript(callId) {
 
 function closeModal() { document.getElementById('modal').classList.remove('open'); }
 document.getElementById('modal').addEventListener('click', e => { if (e.target === document.getElementById('modal')) closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 async function loadStats() {
@@ -761,7 +797,7 @@ async function loadStats() {
 }
 
 // ── Outbound ──────────────────────────────────────────────────────────────────
-async function makeCall() {
+async function makeCall(btn) {
   const to  = document.getElementById('ob-to').value.trim();
   const msg = document.getElementById('ob-msg').value.trim();
   let   vars = {};
@@ -773,21 +809,41 @@ async function makeCall() {
   if (msg)  body.firstMessage = msg;
   if (Object.keys(vars).length) body.variables = vars;
 
-  const r = await api('/admin/calls/outbound', 'POST', body);
-  if (r?.ok) showStatus('ob-status', '✓ Samtal startat — ' + to, 'var(--green)');
-  else showStatus('ob-status', '✗ ' + (r?.error || 'Fel'), 'var(--red)');
+  await withLoading(btn, async () => {
+    const r = await api('/admin/calls/outbound', 'POST', body);
+    if (r?._networkError) showStatus('ob-status', '✗ Servern svarar inte', 'var(--red)');
+    else if (r?.ok) {
+      showStatus('ob-status', '✓ Samtal startat — ' + to, 'var(--green)');
+      document.getElementById('ob-to').value = '';
+      document.getElementById('ob-msg').value = '';
+      document.getElementById('ob-vars').value = '';
+    } else {
+      showStatus('ob-status', '✗ ' + (r?.error || 'Fel'), 'var(--red)');
+    }
+  });
 }
 
-async function startBatch() {
+async function startBatch(btn) {
   const raw = document.getElementById('batch-numbers').value.trim();
   if (!raw) return;
   const numbers = raw.split(/[,\\n]+/).map(s => s.trim()).filter(Boolean).map(to => ({ to }));
+  if (!numbers.length) return;
+
+  if (!confirm(\`Starta kampanj och ring \${numbers.length} nummer?\nDetta startar riktiga samtal.\`)) return;
+
   const concurrency = parseInt(document.getElementById('batch-concurrency').value) || 3;
   const delayMs     = parseInt(document.getElementById('batch-delay').value) || 2000;
 
-  const r = await api('/admin/batch-calls', 'POST', { numbers, concurrency, delayMs });
-  if (r?.ok) showStatus('batch-status', '✓ Kampanj startad — ' + numbers.length + ' samtal', 'var(--green)');
-  else showStatus('batch-status', '✗ ' + (r?.error || 'Fel'), 'var(--red)');
+  await withLoading(btn, async () => {
+    const r = await api('/admin/batch-calls', 'POST', { numbers, concurrency, delayMs });
+    if (r?._networkError) showStatus('batch-status', '✗ Servern svarar inte', 'var(--red)');
+    else if (r?.ok) {
+      showStatus('batch-status', '✓ Kampanj startad — ' + numbers.length + ' samtal', 'var(--green)');
+      document.getElementById('batch-numbers').value = '';
+    } else {
+      showStatus('batch-status', '✗ ' + (r?.error || 'Fel'), 'var(--red)');
+    }
+  });
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
