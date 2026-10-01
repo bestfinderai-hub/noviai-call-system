@@ -3,12 +3,11 @@
 // TTS provider factory — selects implementation based on TTS_PROVIDER env var.
 // Providers: edge (default/free), elevenlabs (~75ms, paid), cartesia (~60ms, paid)
 //
-// Per-account/project override: pass { ttsProvider } in providerConfig to CallSession (TODO v2).
-// For now, env-var-based switching covers most use cases.
-//
 // Interface every provider must export:
 //   streamToWebSocket(text, telnyxWs) → { promise, cancel(), byteLength }
 //   warmup() → Promise<void>
+
+const { stripMarkdown } = require('../../services/speech');
 
 const PROVIDERS = {
   edge:        () => require('./edge'),
@@ -36,7 +35,12 @@ function provider(name) {
 }
 
 module.exports = {
-  streamToWebSocket: (text, ws, providerName) => provider(providerName).streamToWebSocket(text, ws),
+  // Strip markdown universally before any provider sees the text.
+  // SSML pause injection is provider-specific (edge.js adds <break> tags).
+  streamToWebSocket: (text, ws, providerName) => {
+    const clean = stripMarkdown(text);
+    return provider(providerName).streamToWebSocket(clean, ws);
+  },
   warmup: (providerName) => provider(providerName).warmup(),
   getProvider,
 };
