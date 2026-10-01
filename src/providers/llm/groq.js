@@ -37,13 +37,17 @@ function loadSystemPrompt() {
   return _cachedPrompt;
 }
 
-async function chat(history, systemPromptOverride) {
+async function chat(history, systemPromptOverride, { maxTokens, temperature } = {}) {
   const start = Date.now();
   const systemPrompt = systemPromptOverride || loadSystemPrompt();
   const messages = [{ role: 'system', content: systemPrompt }, ...history];
 
   const response = await groq().chat.completions.create({
-    model: MODEL(), messages, max_tokens: MAX_TOKENS(), temperature: 0.7, stream: false,
+    model:       MODEL(),
+    messages,
+    max_tokens:  maxTokens ?? MAX_TOKENS(),
+    temperature: temperature ?? 0.7,
+    stream:      false,
   });
 
   const text = (response.choices[0]?.message?.content || '').trim();
