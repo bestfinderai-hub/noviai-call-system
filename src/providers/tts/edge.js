@@ -6,6 +6,7 @@ const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 const { spawn }    = require('child_process');
 const ffmpegPath   = require('ffmpeg-static');
 const WebSocket    = require('ws');
+const { prepareForTts } = require('../../services/speech');
 
 const VOICE  = () => process.env.TTS_VOICE  || 'sv-SE-SofieNeural';
 const FORMAT = OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3;
@@ -43,6 +44,8 @@ function streamToWebSocket(text, telnyxWs) {
     await prev;
     if (cancelled) return;
 
+    // Preprocess: strip markdown + inject SSML natural pauses
+    const prepared = prepareForTts(text, { ssml: true });
     console.log(`[TTS:edge] Synthesizing (${text.length} chars): "${text.slice(0, 60)}"`);
 
     // ── 1. Ensure TTS is ready ─────────────────────────────────────────────────
@@ -98,7 +101,7 @@ function streamToWebSocket(text, telnyxWs) {
 
       let audioStream;
       try {
-        const result = tts.toStream(text);
+        const result = tts.toStream(prepared);
         audioStream = result.audioStream;
       } catch (err) {
         _tts = null;
