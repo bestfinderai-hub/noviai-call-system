@@ -100,6 +100,7 @@ router.get('/config', (_req, res) => {
       idleTimeout1Ms:    parseInt(process.env.IDLE_TIMEOUT_1_MS  || '10000'),
       idleTimeout2Ms:    parseInt(process.env.IDLE_TIMEOUT_2_MS  || '8000'),
       idleMessage1:      process.env.IDLE_MESSAGE_1              || 'Är du kvar?',
+      idleMessage2:      process.env.IDLE_MESSAGE_2              || '',
     },
   });
 });
