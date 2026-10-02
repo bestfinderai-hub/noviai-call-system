@@ -22,6 +22,13 @@ const ENERGY_THRESHOLD       = 8000;
 const MAX_HISTORY_PAIRS      = 20;
 const MAX_RECORDING_BUFFER   = 5000; // ~10 min at 8 kHz mulaw (prevents memory leak)
 
+// Filler words that should not trigger a full LLM turn on their own.
+// Swedish: "eh", "mm", "hm", "ja", "jo", "ok", "ah", "oj", "öh"
+const FILLER_WORDS = new Set([
+  'eh','ehm','mm','mmm','hm','hmm','ja','jo','ok','okej','ah','oh','oj','öh','uh','um',
+]);
+const MIN_MEANINGFUL_WORDS = 2;
+
 // Barge-in requires this many consecutive high-energy chunks to prevent
 // "mm" / "ja" backchannels from interrupting the AI mid-sentence.
 const MIN_BARGEIN_CHUNKS     = 4;   // 4 × 20 ms = 80 ms of actual speech
@@ -271,6 +278,16 @@ class CallSession extends EventEmitter {
       if (!transcript || transcript.length < 2) {
         console.log(`[Session:${this._id()}] Empty transcript — skip`);
         this.state = 'idle';
+        return;
+      }
+
+      // Filter filler-only transcripts ("eh", "mm", "ja" etc.) — prevents false LLM triggers
+      const words = transcript.toLowerCase().replace(/[^a-zåäö\s]/g, '').split(/\s+/).filter(Boolean);
+      const meaningful = words.filter(w => !FILLER_WORDS.has(w));
+      if (meaningful.length < MIN_MEANINGFUL_WORDS) {
+        console.log(`[Session:${this._id()}] Filler-only transcript ("${transcript}") — skip`);
+        this.state = 'idle';
+        this.audioChunks = [];
         return;
       }
 
