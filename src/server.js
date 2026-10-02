@@ -105,6 +105,16 @@ setInterval(() => {
   });
 }, 25_000);
 
+// Render free-tier keepalive — self-ping every 10 min to prevent sleep (15-min threshold)
+if (process.env.NODE_ENV === 'production' && process.env.SERVER_DOMAIN) {
+  setInterval(() => {
+    const https = require('https');
+    https.get(`https://${process.env.SERVER_DOMAIN}/health`, (res) => {
+      res.resume(); // drain
+    }).on('error', () => {}); // ignore errors silently
+  }, 10 * 60 * 1000);
+}
+
 server.on('upgrade', (req, socket, head) => {
   if (req.url?.startsWith('/audio-stream/')) {
     wss.handleUpgrade(req, socket, head, (ws) => {
