@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test test/voicemail.test.js test/providers.test.js test/admin.test.js test/tools.test.js test/analysis.test.js test/sentiment.test.js test/templates.test.js",
+    "test": "node --test test/voicemail.test.js test/providers.test.js test/admin.test.js test/tools.test.js test/analysis.test.js test/sentiment.test.js test/templates.test.js test/filler-filter.test.js",
     "test:voicemail": "node --test test/voicemail.test.js",
     "test:admin": "node --test test/admin.test.js",
     "test:providers": "node --test test/providers.test.js",
