@@ -22,6 +22,19 @@ const ENERGY_THRESHOLD       = 8000;
 const MAX_HISTORY_PAIRS      = 20;
 const MAX_RECORDING_BUFFER   = 5000; // ~10 min at 8 kHz mulaw (prevents memory leak)
 
+// Filler words that should not trigger a full LLM turn on their own.
+// Swedish: "eh", "mm", "hm", "ja", "jo", "ok", "ah", "oj", "öh"
+const FILLER_WORDS = new Set([
+  'eh','ehm','mm','mmm','hm','hmm','ja','jo','ok','okej','ah','oh','oj','öh','uh','um',
+]);
+const MIN_MEANINGFUL_WORDS = 2;
+
+// Barge-in requires this many consecutive high-energy chunks to prevent
+// "mm" / "ja" backchannels from interrupting the AI mid-sentence.
+const MIN_BARGEIN_CHUNKS     = 4;   // 4 × 20 ms = 80 ms of actual speech
+// After AI finishes speaking, ignore user audio for this long (prevents echo/feedback).
+const BARGEIN_BACKOFF_MS     = 350;
+
 class CallSession extends EventEmitter {
   /**
    * @param {string} callControlId
@@ -59,6 +72,11 @@ class CallSession extends EventEmitter {
     this._speakResolve    = null;  // resolve fn for Telnyx-speak fallback
     this._ivrTurnsChecked = 0;   // check first 3 real turns for IVR/voicemail
     this._cleaned         = false; // guard against double cleanup
+
+    // Barge-in quality gate — consecutive high-energy chunk counter
+    this._bargeinCount    = 0;
+    // Timestamp when AI last finished speaking — used for BARGEIN_BACKOFF_MS
+    this._speakEndedAt    = 0;
 
     // Sentiment tracking
     this.sentimentHistory = [];
@@ -125,10 +143,20 @@ class CallSession extends EventEmitter {
       if (this.state === 'speaking') {
         const energy = mulawEnergy(base64Payload);
         if (energy > ENERGY_THRESHOLD * 2) {
-          this._handleBargein(base64Payload);
-          return;
+          this._bargeinCount++;
+          if (this._bargeinCount >= MIN_BARGEIN_CHUNKS) {
+            this._bargeinCount = 0;
+            this._handleBargein(base64Payload);
+          }
+        } else {
+          this._bargeinCount = 0; // reset on silence — must be consecutive
         }
       }
+      return;
+    }
+
+    // Post-speech backoff: ignore audio briefly after AI finishes talking
+    if (this._speakEndedAt && Date.now() - this._speakEndedAt < BARGEIN_BACKOFF_MS) {
       return;
     }
 
@@ -189,6 +217,8 @@ class CallSession extends EventEmitter {
 
   handleMark(name) {
     if (name === 'tts_end' && this.state === 'speaking') {
+      this._speakEndedAt = Date.now(); // start backoff window
+      this._bargeinCount = 0;
       this.state = 'idle';
       this.audioChunks = [];
       this._startIdleTimer();
@@ -248,6 +278,16 @@ class CallSession extends EventEmitter {
       if (!transcript || transcript.length < 2) {
         console.log(`[Session:${this._id()}] Empty transcript — skip`);
         this.state = 'idle';
+        return;
+      }
+
+      // Filter filler-only transcripts ("eh", "mm", "ja" etc.) — prevents false LLM triggers
+      const words = transcript.toLowerCase().replace(/[^a-zåäö\s]/g, '').split(/\s+/).filter(Boolean);
+      const meaningful = words.filter(w => !FILLER_WORDS.has(w));
+      if (meaningful.length < MIN_MEANINGFUL_WORDS) {
+        console.log(`[Session:${this._id()}] Filler-only transcript ("${transcript}") — skip`);
+        this.state = 'idle';
+        this.audioChunks = [];
         return;
       }
 
@@ -398,7 +438,9 @@ class CallSession extends EventEmitter {
     const { promise, cancel, byteLength } = streamToWebSocket(text, this.ws);
     this._cancelTts = cancel;
 
-    const playbackMs = byteLength ? Math.ceil(byteLength / 8) + 5000 : 10000;
+    // byteLength is a getter that accumulates during streaming, so it's 0 at this point.
+    // Estimate from text length: ~65ms per char for Edge TTS at 8kHz mulaw.
+    const playbackMs = Math.ceil(text.length * 65) + 5000;
     const fallbackTimer = setTimeout(() => {
       if (this.state === 'speaking') {
         console.warn(`[Session:${this._id()}] Mark echo timeout — forcing idle`);

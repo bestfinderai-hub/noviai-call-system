@@ -100,6 +100,7 @@ router.get('/config', (_req, res) => {
       idleTimeout1Ms:    parseInt(process.env.IDLE_TIMEOUT_1_MS  || '10000'),
       idleTimeout2Ms:    parseInt(process.env.IDLE_TIMEOUT_2_MS  || '8000'),
       idleMessage1:      process.env.IDLE_MESSAGE_1              || 'Är du kvar?',
+      idleMessage2:      process.env.IDLE_MESSAGE_2              || '',
     },
   });
 });
@@ -235,6 +236,28 @@ router.post('/settings', (req, res) => {
     if (isNaN(v) || v < 100 || v > 3000) return res.status(400).json({ error: 'vadSilenceMs: 100-3000' });
     process.env.VAD_SILENCE_MS = String(v);
     changed.vadSilenceMs = v;
+  }
+
+  if (body.maxCallDuration !== undefined) {
+    const v = parseInt(body.maxCallDuration, 10);
+    if (isNaN(v) || v < 30 || v > 3600) return res.status(400).json({ error: 'maxCallDuration: 30-3600' });
+    process.env.MAX_CALL_DURATION = String(v);
+    changed.maxCallDuration = v;
+  }
+
+  if (body.maxTokensLlm !== undefined) {
+    const v = parseInt(body.maxTokensLlm, 10);
+    if (isNaN(v) || v < 50 || v > 2000) return res.status(400).json({ error: 'maxTokensLlm: 50-2000' });
+    process.env.MAX_TOKENS_LLM = String(v);
+    changed.maxTokensLlm = v;
+  }
+
+  if (body.language !== undefined) {
+    if (typeof body.language !== 'string' || !/^[a-z]{2}$/.test(body.language)) {
+      return res.status(400).json({ error: 'language: 2-letter code (sv, en)' });
+    }
+    process.env.CALL_LANGUAGE = body.language;
+    changed.language = body.language;
   }
 
   if (Object.keys(changed).length === 0) {
