@@ -47,6 +47,14 @@ wss.on('connection', (ws, req) => {
   const session = new CallSession(callControlId, ws, meta);
   sessions.set(callControlId, session);
 
+  // Fire greeting on connect — Telnyx may send 'connected', 'start', or go straight to 'media'.
+  // A 300 ms delay lets the audio pipeline settle before we push audio.
+  setTimeout(() => {
+    session.sendGreeting().catch(err =>
+      console.error('[WS] Greeting error:', err.message)
+    );
+  }, 300);
+
   session.on('ended', () => {
     sessions.delete(callControlId);
     console.log(`[WS] Session removed: ${callControlId.slice(-8)}`);
@@ -57,8 +65,13 @@ wss.on('connection', (ws, req) => {
     try { msg = JSON.parse(rawMsg); } catch { return; }
 
     switch (msg.event) {
+      case 'connected':
+        console.log(`[WS] Stream connected: ${callControlId.slice(-8)}`);
+        break;
+
       case 'start':
-        console.log(`[WS] Stream started for ${callControlId.slice(-8)}`);
+        console.log(`[WS] Stream started: ${callControlId.slice(-8)}`);
+        // Greeting is already scheduled on connection; sendGreeting() is idempotent.
         session.sendGreeting().catch(err =>
           console.error('[WS] Greeting error:', err.message)
         );

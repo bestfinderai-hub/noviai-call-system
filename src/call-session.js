@@ -73,6 +73,7 @@ class CallSession extends EventEmitter {
     this._speakResolve    = null;  // resolve fn for Telnyx-speak fallback
     this._ivrTurnsChecked = 0;   // check first 3 real turns for IVR/voicemail
     this._cleaned         = false; // guard against double cleanup
+    this._greetingSent    = false; // idempotency guard — sendGreeting() fires only once
 
     // Barge-in quality gate — consecutive high-energy chunk counter
     this._bargeinCount    = 0;
@@ -230,6 +231,8 @@ class CallSession extends EventEmitter {
   // ── Greeting ─────────────────────────────────────────────────────────────────
 
   async sendGreeting() {
+    if (this._greetingSent) return;
+    this._greetingSent = true;
     const mode = (process.env.FIRST_MESSAGE_MODE || 'assistant').toLowerCase();
 
     if (mode === 'user') {
@@ -463,9 +466,9 @@ class CallSession extends EventEmitter {
       this._cancelTts = null;
     }
 
-    // ── Telnyx-speak fallback — fires when Edge TTS produced 0 audio bytes ────
-    if (byteLength === 0 && !streamFailed && this.state === 'speaking') {
-      console.warn(`[Session:${this._id()}] Edge TTS produced 0 bytes — falling back to Telnyx speak`);
+    // ── Telnyx-speak fallback — fires when Edge TTS produced 0 bytes OR failed ─
+    if ((byteLength === 0 || streamFailed) && this.state === 'speaking') {
+      console.warn(`[Session:${this._id()}] Edge TTS ${streamFailed ? 'failed' : 'produced 0 bytes'} — falling back to Telnyx speak`);
       await this._speakViaTelnyx(text);
       return;
     }
