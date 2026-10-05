@@ -6,7 +6,6 @@ const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
 const { spawn }    = require('child_process');
 const ffmpegPath   = require('ffmpeg-static');
 const WebSocket    = require('ws');
-const { addNaturalPauses } = require('../../services/speech');
 
 const VOICE  = () => process.env.TTS_VOICE  || 'sv-SE-SofieNeural';
 const FORMAT = OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3;
@@ -48,9 +47,10 @@ function streamToWebSocket(text, telnyxWs) {
     await prev;
     if (cancelled) return;
 
-    // Markdown is already stripped by tts/index.js — add SSML pauses here (Edge-specific)
-    const prepared = addNaturalPauses(text);
-    console.log(`[TTS:edge] Synthesizing (${prepared.length} chars, raw=${text.length}): "${text.slice(0, 60)}"`);
+    // Plain text — no SSML. Edge TTS's own prosody model handles pauses better than
+    // injected <break> tags, which tend to make speech sound more robotic.
+    const prepared = text;
+    console.log(`[TTS:edge] Synthesizing (${prepared.length} chars): "${text.slice(0, 60)}"`);
 
     // ── 1. Ensure TTS is ready ─────────────────────────────────────────────────
     let tts;
