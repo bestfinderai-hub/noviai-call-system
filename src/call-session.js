@@ -73,6 +73,7 @@ class CallSession extends EventEmitter {
     this._speakResolve    = null;  // resolve fn for Telnyx-speak fallback
     this._ivrTurnsChecked = 0;   // check first 3 real turns for IVR/voicemail
     this._cleaned         = false; // guard against double cleanup
+    this._greetingSent    = false; // idempotency guard — sendGreeting() fires only once
 
     // Barge-in quality gate — consecutive high-energy chunk counter
     this._bargeinCount    = 0;
@@ -108,6 +109,9 @@ class CallSession extends EventEmitter {
     this._maxTimer = setTimeout(() => this._endCall('max_duration'), this.maxCallMs);
 
     console.log(`[Session:${this._id()}] Started dir=${this.direction} from=${this.phoneFrom || '?'} tools=${this._tools.length}`);
+
+    const { publish } = require('./features/events');
+    publish('call.started', { callId: this.callControlId, from: this.phoneFrom, to: this.phoneTo, direction: this.direction });
   }
 
   _id() { return this.callControlId.slice(-8); }
@@ -230,6 +234,8 @@ class CallSession extends EventEmitter {
   // ── Greeting ─────────────────────────────────────────────────────────────────
 
   async sendGreeting() {
+    if (this._greetingSent) return;
+    this._greetingSent = true;
     const mode = (process.env.FIRST_MESSAGE_MODE || 'assistant').toLowerCase();
 
     if (mode === 'user') {
@@ -330,6 +336,9 @@ class CallSession extends EventEmitter {
     this.turnCount++;
     console.log(`[Session:${this._id()}] Turn ${this.turnCount} (+${Date.now()-t0}ms) User: "${userText}"`);
 
+    const { publish } = require('./features/events');
+    publish('call.transcript', { callId: this.callControlId, turn: this.turnCount, text: userText, role: 'user' });
+
     // 3. LLM — collect full response (tools may require a second pass)
     this.history.push({ role: 'user', content: userText });
 
@@ -406,6 +415,9 @@ class CallSession extends EventEmitter {
       this.history = this.history.slice(-MAX_HISTORY_PAIRS * 2);
     }
 
+    const { publish } = require('./features/events');
+    publish('call.transcript', { callId: this.callControlId, turn: this.turnCount, text: finalText, role: 'assistant' });
+
     // Fire real-time conversation webhook (non-blocking)
     this._fireConversationWebhook();
 
@@ -463,9 +475,9 @@ class CallSession extends EventEmitter {
       this._cancelTts = null;
     }
 
-    // ── Telnyx-speak fallback — fires when Edge TTS produced 0 audio bytes ────
-    if (byteLength === 0 && !streamFailed && this.state === 'speaking') {
-      console.warn(`[Session:${this._id()}] Edge TTS produced 0 bytes — falling back to Telnyx speak`);
+    // ── Telnyx-speak fallback — fires when Edge TTS produced 0 bytes OR failed ─
+    if ((byteLength === 0 || streamFailed) && this.state === 'speaking') {
+      console.warn(`[Session:${this._id()}] Edge TTS ${streamFailed ? 'failed' : 'produced 0 bytes'} — falling back to Telnyx speak`);
       await this._speakViaTelnyx(text);
       return;
     }
@@ -674,6 +686,9 @@ class CallSession extends EventEmitter {
         recordingUrl:    recordingUrl || null,
       }).catch(err => console.error('[Session] Report save failed:', err.message));
     });
+
+    const { publish } = require('./features/events');
+    publish('call.ended', { callId: this.callControlId, from: this.phoneFrom, durationSec, turnCount: this.turnCount, cause: this._hangupCause });
 
     this.emit('ended', {
       callControlId: this.callControlId,

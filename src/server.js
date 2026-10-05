@@ -10,7 +10,7 @@ const { createWebhookRouter } = require('./webhooks');
 const { CallSession } = require('./call-session');
 const { warmup: warmupTts } = require('./services/tts');
 const { initSchema } = require('./db');
-const { router: adminRouter } = require('./routes/admin');
+const { router: adminRouter, setSessions } = require('./routes/admin');
 const { router: dashboardRouter } = require('./routes/dashboard');
 
 // ── App setup ────────────────────────────────────────────────────────────────
@@ -47,6 +47,14 @@ wss.on('connection', (ws, req) => {
   const session = new CallSession(callControlId, ws, meta);
   sessions.set(callControlId, session);
 
+  // Fire greeting on connect — Telnyx may send 'connected', 'start', or go straight to 'media'.
+  // A 300 ms delay lets the audio pipeline settle before we push audio.
+  setTimeout(() => {
+    session.sendGreeting().catch(err =>
+      console.error('[WS] Greeting error:', err.message)
+    );
+  }, 300);
+
   session.on('ended', () => {
     sessions.delete(callControlId);
     console.log(`[WS] Session removed: ${callControlId.slice(-8)}`);
@@ -57,8 +65,13 @@ wss.on('connection', (ws, req) => {
     try { msg = JSON.parse(rawMsg); } catch { return; }
 
     switch (msg.event) {
+      case 'connected':
+        console.log(`[WS] Stream connected: ${callControlId.slice(-8)}`);
+        break;
+
       case 'start':
-        console.log(`[WS] Stream started for ${callControlId.slice(-8)}`);
+        console.log(`[WS] Stream started: ${callControlId.slice(-8)}`);
+        // Greeting is already scheduled on connection; sendGreeting() is idempotent.
         session.sendGreeting().catch(err =>
           console.error('[WS] Greeting error:', err.message)
         );
@@ -104,6 +117,16 @@ setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) ws.ping();
   });
 }, 25_000);
+
+// Render free-tier keepalive — self-ping every 10 min to prevent sleep (15-min threshold)
+if (process.env.NODE_ENV === 'production' && process.env.SERVER_DOMAIN) {
+  setInterval(() => {
+    const https = require('https');
+    https.get(`https://${process.env.SERVER_DOMAIN}/health`, (res) => {
+      res.resume(); // drain
+    }).on('error', () => {}); // ignore errors silently
+  }, 10 * 60 * 1000);
+}
 
 server.on('upgrade', (req, socket, head) => {
   if (req.url?.startsWith('/audio-stream/')) {
@@ -236,6 +259,8 @@ async function start() {
   } else {
     console.warn('[DB] No database URL — call reports will not be saved');
   }
+
+  setSessions(sessions);
 
   server.listen(PORT, () => {
     console.log('');

@@ -276,6 +276,9 @@ function createWebhookRouter(sessions, callMeta) {
     const { event_type, payload } = event;
     console.log(`[Webhook] ${event_type} — ${(payload?.call_control_id || '').slice(-8)}`);
 
+    const { publish } = require('./features/events');
+    publish('webhook', { event_type, callId: payload?.call_control_id, from: payload?.from, to: payload?.to });
+
     try {
       switch (event_type) {
         case 'call.initiated':
