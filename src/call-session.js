@@ -109,6 +109,9 @@ class CallSession extends EventEmitter {
     this._maxTimer = setTimeout(() => this._endCall('max_duration'), this.maxCallMs);
 
     console.log(`[Session:${this._id()}] Started dir=${this.direction} from=${this.phoneFrom || '?'} tools=${this._tools.length}`);
+
+    const { publish } = require('./features/events');
+    publish('call.started', { callId: this.callControlId, from: this.phoneFrom, to: this.phoneTo, direction: this.direction });
   }
 
   _id() { return this.callControlId.slice(-8); }
@@ -333,6 +336,9 @@ class CallSession extends EventEmitter {
     this.turnCount++;
     console.log(`[Session:${this._id()}] Turn ${this.turnCount} (+${Date.now()-t0}ms) User: "${userText}"`);
 
+    const { publish } = require('./features/events');
+    publish('call.transcript', { callId: this.callControlId, turn: this.turnCount, text: userText, role: 'user' });
+
     // 3. LLM — collect full response (tools may require a second pass)
     this.history.push({ role: 'user', content: userText });
 
@@ -408,6 +414,9 @@ class CallSession extends EventEmitter {
     if (this.history.length > MAX_HISTORY_PAIRS * 2) {
       this.history = this.history.slice(-MAX_HISTORY_PAIRS * 2);
     }
+
+    const { publish } = require('./features/events');
+    publish('call.transcript', { callId: this.callControlId, turn: this.turnCount, text: finalText, role: 'assistant' });
 
     // Fire real-time conversation webhook (non-blocking)
     this._fireConversationWebhook();
@@ -677,6 +686,9 @@ class CallSession extends EventEmitter {
         recordingUrl:    recordingUrl || null,
       }).catch(err => console.error('[Session] Report save failed:', err.message));
     });
+
+    const { publish } = require('./features/events');
+    publish('call.ended', { callId: this.callControlId, from: this.phoneFrom, durationSec, turnCount: this.turnCount, cause: this._hangupCause });
 
     this.emit('ended', {
       callControlId: this.callControlId,

@@ -53,6 +53,8 @@ ALTER TABLE novai_calls ADD COLUMN IF NOT EXISTS success_evaluation TEXT;
 ALTER TABLE novai_calls ADD COLUMN IF NOT EXISTS sentiment_turns    JSONB;
 ALTER TABLE novai_calls ADD COLUMN IF NOT EXISTS cost_usd           NUMERIC(8,4);
 ALTER TABLE novai_calls ADD COLUMN IF NOT EXISTS recording_url      TEXT;
+ALTER TABLE novai_calls ADD COLUMN IF NOT EXISTS lead_status        TEXT;
+ALTER TABLE novai_calls ADD COLUMN IF NOT EXISTS lead_note          TEXT;
 `;
 
 async function initSchema() {

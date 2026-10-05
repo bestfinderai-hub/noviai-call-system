@@ -10,7 +10,7 @@ const { createWebhookRouter } = require('./webhooks');
 const { CallSession } = require('./call-session');
 const { warmup: warmupTts } = require('./services/tts');
 const { initSchema } = require('./db');
-const { router: adminRouter } = require('./routes/admin');
+const { router: adminRouter, setSessions } = require('./routes/admin');
 const { router: dashboardRouter } = require('./routes/dashboard');
 
 // ── App setup ────────────────────────────────────────────────────────────────
@@ -259,6 +259,8 @@ async function start() {
   } else {
     console.warn('[DB] No database URL — call reports will not be saved');
   }
+
+  setSessions(sessions);
 
   server.listen(PORT, () => {
     console.log('');

@@ -554,4 +554,109 @@ router.delete('/batch-calls/:batchId', (req, res) => {
   res.json({ ok: true, cancelled: true });
 });
 
-module.exports = { router, getConfig: () => ({ ..._config }) };
+// ── GET /admin/events (SSE) ───────────────────────────────────────────────────
+// Server-Sent Events stream — call lifecycle + webhook events for live dashboard.
+
+router.get('/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const { subscribe } = require('../features/events');
+  const unsub = subscribe(res);
+
+  // Keepalive ping every 20s to prevent proxy timeout
+  const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 20_000);
+
+  req.on('close', () => { unsub(); clearInterval(ping); });
+});
+
+// ── GET /admin/webhook-log ────────────────────────────────────────────────────
+
+router.get('/webhook-log', (_req, res) => {
+  const { recentWebhooks } = require('../features/events');
+  res.json({ events: recentWebhooks() });
+});
+
+// ── GET /admin/active-calls ───────────────────────────────────────────────────
+// Returns the list of active call sessions (injected via middleware trick).
+
+let _sessionsRef = null;
+function setSessions(sessions) { _sessionsRef = sessions; }
+
+router.get('/active-calls', (_req, res) => {
+  if (!_sessionsRef) return res.json({ calls: [] });
+  const calls = [..._sessionsRef.entries()].map(([cid, s]) => ({
+    callId:     cid,
+    from:       s.phoneFrom,
+    to:         s.phoneTo,
+    direction:  s.direction,
+    turnCount:  s.turnCount,
+    state:      s.state,
+    durationSec: Math.round((Date.now() - s.startTime) / 1000),
+  }));
+  res.json({ calls });
+});
+
+// ── POST /admin/tts-test ──────────────────────────────────────────────────────
+// Synthesize text and return MP3 as base64 — for voice preview in dashboard.
+
+router.post('/tts-test', async (req, res) => {
+  const { text, voice } = req.body || {};
+  if (!text || typeof text !== 'string') return res.status(400).json({ error: 'text required' });
+  if (text.length > 300) return res.status(400).json({ error: 'text: max 300 chars' });
+
+  const voiceName = (typeof voice === 'string' && voice.length < 100 ? voice : null)
+    || process.env.TTS_VOICE || 'sv-SE-SofieNeural';
+
+  try {
+    const { MsEdgeTTS, OUTPUT_FORMAT } = require('msedge-tts');
+    const tts = new MsEdgeTTS();
+    await tts.setMetadata(voiceName, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3, {});
+    const { audioStream } = tts.toStream(text);
+    const chunks = [];
+    await new Promise((resolve, reject) => {
+      audioStream.on('data', c => chunks.push(c));
+      audioStream.on('end', resolve);
+      audioStream.on('error', reject);
+    });
+    const audio = Buffer.concat(chunks);
+    res.json({ ok: true, audio: audio.toString('base64'), format: 'mp3', voice: voiceName, bytes: audio.length });
+  } catch (err) {
+    console.error('[Admin] TTS test error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PATCH /admin/calls/:callId/lead ──────────────────────────────────────────
+// Set lead status on a completed call: interested | not_interested | callback | qualified
+
+const VALID_LEAD_STATUSES = ['interested', 'not_interested', 'callback', 'qualified', null];
+
+router.patch('/calls/:callId/lead', async (req, res) => {
+  const callId = req.params.callId?.slice(0, 128);
+  if (!callId) return res.status(400).json({ error: 'callId required' });
+
+  const { status, note } = req.body || {};
+  if (!VALID_LEAD_STATUSES.includes(status)) {
+    return res.status(400).json({ error: `status: ${VALID_LEAD_STATUSES.filter(Boolean).join(' | ')}` });
+  }
+  if (note !== undefined && (typeof note !== 'string' || note.length > 500)) {
+    return res.status(400).json({ error: 'note: string max 500 chars' });
+  }
+
+  try {
+    await query(
+      `UPDATE novai_calls SET lead_status = $1, lead_note = $2 WHERE call_id = $3`,
+      [status, note ?? null, callId],
+    );
+    res.json({ ok: true, callId, status, note: note ?? null });
+  } catch (err) {
+    console.error('[Admin] Lead update error:', err.message);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+module.exports = { router, getConfig: () => ({ ..._config }), setSessions };

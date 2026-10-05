@@ -286,6 +286,10 @@ kbd{background:var(--surface2);border:1px solid var(--border2);border-radius:4px
     <div class="nav-item" onclick="nav('stats',this)"><span class="nav-icon">📊</span> Statistik</div>
     <div class="nav-section">Kampanjer</div>
     <div class="nav-item" onclick="nav('outbound',this)"><span class="nav-icon">📤</span> Ring ut</div>
+    <div class="nav-section">Verktyg</div>
+    <div class="nav-item" onclick="nav('live',this)"><span class="nav-icon">🔴</span> Live Monitor <span class="nav-badge green" id="live-badge" style="display:none">0</span></div>
+    <div class="nav-item" onclick="nav('ttstest',this)"><span class="nav-icon">🎧</span> TTS Test</div>
+    <div class="nav-item" onclick="nav('webhooklog',this)"><span class="nav-icon">📡</span> Webhook Log</div>
     <div class="sidebar-bottom">
       <div class="sidebar-user">
         <div class="sidebar-dot" id="server-dot" style="width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0"></div>
@@ -446,6 +450,16 @@ kbd{background:var(--surface2);border:1px solid var(--border2);border-radius:4px
         </div>
       </div>
       <div class="card">
+        <div class="card-title"><span class="card-title-icon">🎧</span> Testa rösten live</div>
+        <div class="field"><textarea id="tts-preview-text" style="min-height:80px" placeholder="Skriv valfri text och tryck Spela — du hör exakt hur rösten låter">Hej, det här är Peter på Bestfinder. Hur kan jag hjälpa dig idag?</textarea></div>
+        <div class="btn-row">
+          <button class="btn btn-success" onclick="previewTts(this)">▶ Spela upp</button>
+          <span id="tts-preview-status" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+        <audio id="tts-audio" style="margin-top:12px;width:100%;display:none" controls></audio>
+      </div>
+
+      <div class="card">
         <div class="card-title"><span class="card-title-icon">🧠</span> STT — Tal till text &amp; LLM</div>
         <div class="grid2">
           <div class="field"><label>STT Provider</label>
@@ -531,7 +545,7 @@ kbd{background:var(--surface2);border:1px solid var(--border2);border-radius:4px
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Tid</th><th>Från</th><th>Till</th><th>Riktning</th><th>Längd</th><th>Turer</th><th>Avslut</th><th></th></tr></thead>
+          <thead><tr><th>Tid</th><th>Från</th><th>Riktning</th><th>Längd</th><th>Turer</th><th>Avslut</th><th>Lead</th><th></th></tr></thead>
           <tbody id="calls-body"><tr class="empty-row"><td colspan="8"><span class="empty-icon">📋</span>Klicka Ladda för att hämta samtal</td></tr></tbody>
         </table>
       </div>
@@ -594,6 +608,94 @@ kbd{background:var(--surface2);border:1px solid var(--border2);border-radius:4px
         <div class="btn-row">
           <button class="btn btn-success" onclick="startBatch(this)">🚀 Starta kampanj</button>
           <span class="save-msg" id="batch-status"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ LIVE MONITOR ═════════════════════════════════════════════════════════ -->
+    <div class="page" id="page-live">
+      <div class="page-header">
+        <div class="page-title"><h2>Live Monitor</h2><p>Aktiva samtal och realtidstranskript</p></div>
+        <div class="page-actions"><button class="btn btn-ghost btn-sm" onclick="clearLiveLog()">Rensa log</button></div>
+      </div>
+      <div class="grid2" style="margin-bottom:16px">
+        <div class="card">
+          <div class="card-title"><span class="card-title-icon">📞</span> Aktiva samtal <span id="active-count" style="color:var(--green);margin-left:8px">0</span></div>
+          <div id="active-calls-list" style="min-height:60px;color:var(--muted);font-size:13px">Inga aktiva samtal</div>
+        </div>
+        <div class="card">
+          <div class="card-title"><span class="card-title-icon">📊</span> SSE-status</div>
+          <div id="sse-status" style="font-size:13px;color:var(--muted)">Ansluter...</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="card-title-icon">💬</span> Realtidstranskript</div>
+        <div id="live-transcript" style="min-height:200px;max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:4px 0">
+          <div style="color:var(--muted);font-size:13px;text-align:center;padding:40px 0">Väntar på samtal...</div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <div class="card-title"><span class="card-title-icon">🔔</span> Händelseflöde</div>
+        <div id="event-feed" style="min-height:120px;max-height:280px;overflow-y:auto;font-family:monospace;font-size:11px;line-height:1.8;color:var(--muted2)">
+          <div>— väntar på händelser —</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ TTS TEST ══════════════════════════════════════════════════════════════ -->
+    <div class="page" id="page-ttstest">
+      <div class="page-header">
+        <div class="page-title"><h2>TTS Test</h2><p>Hör exakt hur rösten låter — testa olika fraser och röster</p></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="card-title-icon">🎙️</span> Testa röst</div>
+        <div class="grid2">
+          <div class="field"><label>Röst</label>
+            <select id="tt-voice">
+              <option value="">— Aktuell serverröst —</option>
+              <option value="sv-SE-SofieNeural">sv-SE-SofieNeural (kvinna)</option>
+              <option value="sv-SE-MattiasNeural">sv-SE-MattiasNeural (man)</option>
+            </select>
+          </div>
+          <div class="field"><label>Snabbfraser</label>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:2px">
+              <button class="btn btn-ghost btn-sm" onclick="setTtText('Hej, det här är Peter på Bestfinder. Hur kan jag hjälpa dig idag?')">Hälsning</button>
+              <button class="btn btn-ghost btn-sm" onclick="setTtText('Okej, jag förstår det. Kan du berätta lite mer om er situation?')">Lyssna</button>
+              <button class="btn btn-ghost btn-sm" onclick="setTtText('Absolut, det förstår jag. Tack så mycket för din tid, ha en fin dag!')">Avslut</button>
+            </div>
+          </div>
+        </div>
+        <div class="field"><label>Text att syntetisera</label>
+          <textarea id="tt-text" style="min-height:100px">Hej, det här är Peter på Bestfinder. Vi hjälper företag hitta rätt finansieringslösning, och jag undrar om ni har sett er över alternativa möjligheter det senaste halvåret?</textarea>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-success" onclick="runTtsTest(this)">▶ Syntetisera och spela</button>
+          <span id="tt-status" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+        <audio id="tt-audio" style="margin-top:16px;width:100%;display:none" controls></audio>
+      </div>
+      <div class="card">
+        <div class="card-title"><span class="card-title-icon">📋</span> Testhistorik</div>
+        <div id="tt-history" style="min-height:60px;color:var(--muted);font-size:13px">Ingen historik ännu</div>
+      </div>
+    </div>
+
+    <!-- ═══ WEBHOOK LOG ═══════════════════════════════════════════════════════════ -->
+    <div class="page" id="page-webhooklog">
+      <div class="page-header">
+        <div class="page-title"><h2>Webhook Log</h2><p>Inkommande Telnyx-händelser — realtid</p></div>
+        <div class="page-actions"><button class="btn btn-ghost btn-sm" onclick="loadWebhookLog()">↻ Ladda</button></div>
+      </div>
+      <div class="card">
+        <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap" id="wh-filter-btns">
+          <button class="btn btn-ghost btn-sm wh-filter active" data-type="" onclick="whFilter(this,'')">Alla</button>
+          <button class="btn btn-ghost btn-sm wh-filter" data-type="call.initiated" onclick="whFilter(this,'call.initiated')">initiated</button>
+          <button class="btn btn-ghost btn-sm wh-filter" data-type="call.answered" onclick="whFilter(this,'call.answered')">answered</button>
+          <button class="btn btn-ghost btn-sm wh-filter" data-type="call.hangup" onclick="whFilter(this,'call.hangup')">hangup</button>
+          <button class="btn btn-ghost btn-sm wh-filter" data-type="webhook" onclick="whFilter(this,'webhook')">övriga</button>
+        </div>
+        <div id="wh-list" style="font-family:monospace;font-size:12px;line-height:1.9;max-height:500px;overflow-y:auto;color:var(--muted2)">
+          Laddar...
         </div>
       </div>
     </div>
@@ -1141,6 +1243,289 @@ function causeBadge(cause) {
 
 function esc(str) {
   return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Calls: lead status + sentiment ─────────────────────────────────────────
+
+function leadBadge(status) {
+  const m = { interested:'green,⭐ Intresserad', not_interested:'red,✗ Ej intresserad', callback:'yellow,📅 Callback', qualified:'accent,✓ Kvalificerad' };
+  const [c,l] = (m[status]||'').split(',');
+  if (!c) return '<span style="color:var(--muted);font-size:11px">—</span>';
+  return \`<span class="badge badge-\${c}">\${l}</span>\`;
+}
+
+async function setLead(callId, status) {
+  const r = await api('/admin/calls/' + encodeURIComponent(callId) + '/lead', 'PATCH', { status });
+  if (r?.ok) { toast('Lead uppdaterat', status); loadCalls(); }
+  else toast('Fel', r?.error||'', 'error');
+}
+
+// Override loadCalls to include lead column
+const _origLoadCalls = loadCalls;
+async function loadCalls() {
+  const phone = document.getElementById('calls-phone-filter').value.trim();
+  const qs = phone ? '?phone=' + encodeURIComponent(phone) + '&limit=50' : '?limit=50';
+  const tbody = document.getElementById('calls-body');
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="8"><span class="spinner" style="width:20px;height:20px"></span></td></tr>';
+  const r = await api('/admin/calls' + qs);
+
+  if (!r || r._err) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="8"><span class="empty-icon">⚠️</span>Kunde inte hämta samtal</td></tr>';
+    return;
+  }
+  _callsCache = r.calls || [];
+  const badge = document.getElementById('calls-badge');
+  if (_callsCache.length) { badge.textContent = _callsCache.length; badge.style.display = ''; }
+  else badge.style.display = 'none';
+
+  if (!_callsCache.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="8"><span class="empty-icon">📭</span>Inga samtal ännu</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _callsCache.map(c => {
+    const dt = new Date(c.started_at);
+    const dtStr = dt.toLocaleDateString('sv-SE') + ' ' + dt.toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'});
+    const dir = c.direction === 'incoming' ? '<span class="badge badge-blue">↙ in</span>' : '<span class="badge badge-accent">↗ ut</span>';
+    const leadMenu = \`<select onchange="setLead('\${esc(c.call_id)}',this.value)" style="font-size:11px;padding:3px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text)">
+      <option value="">—</option>
+      <option value="interested" \${c.lead_status==='interested'?'selected':''}>⭐ Intresserad</option>
+      <option value="not_interested" \${c.lead_status==='not_interested'?'selected':''}>✗ Ej intresserad</option>
+      <option value="callback" \${c.lead_status==='callback'?'selected':''}>📅 Callback</option>
+      <option value="qualified" \${c.lead_status==='qualified'?'selected':''}>✓ Kvalificerad</option>
+    </select>\`;
+    return \`<tr>
+      <td style="white-space:nowrap;font-size:12px">\${dtStr}</td>
+      <td style="font-family:monospace;font-size:12px">\${esc(c.phone_from||'—')}</td>
+      <td>\${dir}</td>
+      <td>\${c.duration_sec!=null?fmtDur(c.duration_sec):'—'}</td>
+      <td>\${c.turn_count??'—'}</td>
+      <td>\${causeBadge(c.hangup_cause)}</td>
+      <td>\${leadMenu}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="openTranscript('\${esc(c.call_id)}')">📋</button></td>
+    </tr>\`;
+  }).join('');
+}
+
+// ── SSE Live Monitor ────────────────────────────────────────────────────────
+
+let _sse = null;
+let _liveTranscripts = {}; // callId → [{role,text}]
+let _activeCallsMap = {};
+
+function startSse() {
+  if (_sse) return;
+  _sse = new EventSource(BASE + '/admin/events?token=' + encodeURIComponent(TOKEN));
+
+  _sse.onopen = () => {
+    document.getElementById('sse-status').innerHTML = '<span style="color:var(--green)">● Ansluten</span>';
+  };
+
+  _sse.onerror = () => {
+    document.getElementById('sse-status').innerHTML = '<span style="color:var(--red)">● Frånkopplad — försöker igen...</span>';
+  };
+
+  _sse.onmessage = (e) => {
+    let evt; try { evt = JSON.parse(e.data); } catch { return; }
+    appendEventFeed(evt);
+
+    if (evt.type === 'call.started') {
+      _activeCallsMap[evt.data.callId] = { ...evt.data, startTs: evt.ts };
+      _liveTranscripts[evt.data.callId] = [];
+      renderActiveCalls();
+      const badge = document.getElementById('live-badge');
+      badge.textContent = Object.keys(_activeCallsMap).length;
+      badge.style.display = '';
+    }
+    if (evt.type === 'call.transcript') {
+      const cid = evt.data.callId;
+      if (!_liveTranscripts[cid]) _liveTranscripts[cid] = [];
+      _liveTranscripts[cid].push({ role: evt.data.role, text: evt.data.text });
+      renderLiveTranscript();
+    }
+    if (evt.type === 'call.ended') {
+      delete _activeCallsMap[evt.data.callId];
+      delete _liveTranscripts[evt.data.callId];
+      renderActiveCalls();
+      const cnt = Object.keys(_activeCallsMap).length;
+      const badge = document.getElementById('live-badge');
+      badge.textContent = cnt;
+      if (!cnt) badge.style.display = 'none';
+    }
+  };
+}
+
+function appendEventFeed(evt) {
+  const feed = document.getElementById('event-feed');
+  if (!feed) return;
+  const ts = new Date(evt.ts).toLocaleTimeString('sv-SE');
+  const color = evt.type.startsWith('call.') ? 'var(--accent2)' : 'var(--muted)';
+  const line = document.createElement('div');
+  line.innerHTML = \`<span style="color:var(--muted)">\${ts}</span> <span style="color:\${color}">\${esc(evt.type)}</span> \${evt.data?.callId ? '<span style="color:var(--muted)">…'+esc(evt.data.callId.slice(-6))+'</span>' : ''}\${evt.data?.from?' <span style="color:var(--blue)">'+esc(evt.data.from)+'</span>':''}\`;
+  if (feed.firstChild?.textContent === '— väntar på händelser —') feed.innerHTML = '';
+  feed.appendChild(line);
+  feed.scrollTop = feed.scrollHeight;
+  // Keep max 100 lines
+  while (feed.children.length > 100) feed.removeChild(feed.firstChild);
+}
+
+function renderActiveCalls() {
+  const el = document.getElementById('active-calls-list');
+  const cnt = document.getElementById('active-count');
+  const calls = Object.values(_activeCallsMap);
+  cnt.textContent = calls.length;
+  if (!calls.length) { el.innerHTML = '<div style="color:var(--muted);padding:12px 0">Inga aktiva samtal</div>'; return; }
+  el.innerHTML = calls.map(c => {
+    const age = Math.round((Date.now() - c.startTs) / 1000);
+    return \`<div style="display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+      <span style="color:var(--green);font-size:18px">●</span>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:600">\${esc(c.from||'okänt nummer')}</div>
+        <div style="font-size:11px;color:var(--muted)">\${c.direction||'inkommande'} · \${fmtDur(age)}</div>
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="hangupCall('\${esc(c.callId)}')">Lägg på</button>
+    </div>\`;
+  }).join('');
+}
+
+function renderLiveTranscript() {
+  const el = document.getElementById('live-transcript');
+  if (!el) return;
+  const allTurns = Object.values(_liveTranscripts).flat().slice(-30);
+  if (!allTurns.length) { el.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:40px 0">Väntar på samtal...</div>'; return; }
+  el.innerHTML = allTurns.map(t => {
+    const isUser = t.role === 'user';
+    return \`<div class="msg \${isUser?'user':'assistant'}"><div class="msg-role">\${isUser?'👤 Kund':'🤖 AI'}</div>\${esc(t.text)}</div>\`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+async function hangupCall(callId) {
+  if (!confirm('Lägg på samtalet?')) return;
+  const r = await api('/admin/calls/' + encodeURIComponent(callId) + '/hangup', 'POST');
+  if (r?.ok) toast('Samtal avslutat', '');
+  else toast('Fel', r?.error||'', 'error');
+}
+
+function clearLiveLog() {
+  document.getElementById('live-transcript').innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:40px 0">Väntar på samtal...</div>';
+  document.getElementById('event-feed').innerHTML = '<div>— rensad —</div>';
+}
+
+// ── TTS Test ─────────────────────────────────────────────────────────────────
+
+let _ttHistory = [];
+
+function setTtText(text) {
+  document.getElementById('tt-text').value = text;
+  document.getElementById('tts-preview-text').value = text;
+}
+
+async function previewTts(btn) {
+  const text = document.getElementById('tts-preview-text').value.trim();
+  if (!text) return;
+  await _doTtsTest(text, '', 'tts-audio', 'tts-preview-status', btn);
+}
+
+async function runTtsTest(btn) {
+  const text  = document.getElementById('tt-text').value.trim();
+  const voice = document.getElementById('tt-voice').value;
+  if (!text) return;
+  await _doTtsTest(text, voice, 'tt-audio', 'tt-status', btn);
+}
+
+async function _doTtsTest(text, voice, audioElId, statusElId, btn) {
+  const statusEl = document.getElementById(statusElId);
+  const origHtml = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Syntetiserar...';
+  statusEl.textContent = '';
+
+  const body = { text };
+  if (voice) body.voice = voice;
+
+  const r = await api('/admin/tts-test', 'POST', body);
+  btn.disabled = false; btn.innerHTML = origHtml;
+
+  if (!r || r._err || r.error) {
+    statusEl.style.color = 'var(--red)';
+    statusEl.textContent = '✗ ' + (r?.error || 'Nätverksfel');
+    return;
+  }
+
+  const audioEl = document.getElementById(audioElId);
+  audioEl.src = 'data:audio/mp3;base64,' + r.audio;
+  audioEl.style.display = 'block';
+  audioEl.play();
+
+  statusEl.style.color = 'var(--green)';
+  statusEl.textContent = '✓ ' + r.voice + ' · ' + r.bytes + ' B';
+
+  // Add to history
+  _ttHistory.unshift({ text: text.slice(0,60), voice: r.voice, ts: new Date().toLocaleTimeString('sv-SE') });
+  if (_ttHistory.length > 10) _ttHistory.pop();
+  const hEl = document.getElementById('tt-history');
+  if (hEl) hEl.innerHTML = _ttHistory.map(h =>
+    \`<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--muted)">\${h.ts}</span> <span style="color:var(--accent2)">\${esc(h.voice)}</span> "\${esc(h.text)}\${h.text.length>=60?'...':''}"</div>\`
+  ).join('');
+}
+
+// ── Webhook Log ───────────────────────────────────────────────────────────────
+
+let _whData = [];
+let _whFilterType = '';
+
+async function loadWebhookLog() {
+  const r = await api('/admin/webhook-log');
+  if (!r || r._err) return;
+  _whData = (r.events || []).reverse();
+  renderWebhookLog();
+}
+
+function whFilter(btn, type) {
+  _whFilterType = type;
+  document.querySelectorAll('.wh-filter').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderWebhookLog();
+}
+
+function renderWebhookLog() {
+  const el = document.getElementById('wh-list');
+  if (!el) return;
+  const filtered = _whFilterType
+    ? _whData.filter(e => e.data?.event_type === _whFilterType)
+    : _whData;
+
+  if (!filtered.length) { el.innerHTML = '<div style="color:var(--muted);padding:20px 0">Inga händelser</div>'; return; }
+
+  const typeColors = {
+    'call.initiated': 'var(--green)', 'call.answered': 'var(--blue)',
+    'call.hangup': 'var(--red)', 'call.streaming.started': 'var(--accent2)',
+  };
+  el.innerHTML = filtered.map(e => {
+    const ts = new Date(e.ts).toLocaleTimeString('sv-SE');
+    const evType = e.data?.event_type || e.type;
+    const col = typeColors[evType] || 'var(--muted2)';
+    const from = e.data?.from ? ' · ' + esc(e.data.from) : '';
+    const cid = e.data?.callId ? ' <span style="color:var(--muted)">…' + esc(e.data.callId.slice(-6)) + '</span>' : '';
+    return \`<div style="padding:2px 0"><span style="color:var(--muted)">\${ts}</span> <span style="color:\${col}">\${esc(evType)}</span>\${cid}\${from}</div>\`;
+  }).join('');
+}
+
+// ── Patch nav() to start SSE + load webhook log ──────────────────────────────
+
+const _origNav = nav;
+function nav(id, el) {
+  _origNav(id, el);
+  if (id === 'live' || id === 'webhooklog') {
+    startSse();
+    if (id === 'webhooklog') loadWebhookLog();
+  }
+}
+
+// Auto-start SSE when dashboard loads
+const _origInit = initDashboard;
+async function initDashboard() {
+  await _origInit();
+  startSse();
 }
 <\/script>
 </body>
