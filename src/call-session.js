@@ -80,6 +80,13 @@ class CallSession extends EventEmitter {
     // Timestamp when AI last finished speaking — used for BARGEIN_BACKOFF_MS
     this._speakEndedAt    = 0;
 
+    // Greedy TTS pipeline — true while streaming sentences from LLM to TTS back-to-back
+    this._ttsStreaming    = false;
+
+    // Deepgram live STT session (null when using batch Groq path)
+    this._deepgramLive    = null;
+    this._deepgramKeepalive = null;
+
     // Sentiment tracking
     this.sentimentHistory = [];
     this.lastSentiment    = null;
@@ -112,9 +119,40 @@ class CallSession extends EventEmitter {
 
     const { publish } = require('./features/events');
     publish('call.started', { callId: this.callControlId, from: this.phoneFrom, to: this.phoneTo, direction: this.direction });
+
+    // Deepgram live STT — init if configured
+    if (process.env.STT_PROVIDER === 'deepgram' && process.env.DEEPGRAM_API_KEY) {
+      this._initDeepgramLive();
+    }
   }
 
   _id() { return this.callControlId.slice(-8); }
+
+  // ── Deepgram live STT ────────────────────────────────────────────────────────
+
+  _initDeepgramLive() {
+    const { DeepgramLiveSession } = require('./providers/stt/deepgram-live');
+    this._deepgramLive = new DeepgramLiveSession();
+
+    this._deepgramLive.onTranscript = (text) => {
+      if (this.state === 'processing' || this.state === 'speaking' || this._ttsStreaming) {
+        console.log(`[Session:${this._id()}] Deepgram transcript skipped (state=${this.state}): "${text.slice(0, 40)}"`);
+        return;
+      }
+      this._processTurnFromText(text).catch(err =>
+        console.error(`[Session:${this._id()}] Deepgram turn error:`, err.message)
+      );
+    };
+
+    this._deepgramLive.connect();
+
+    // Deepgram requires a keepalive ping every 8 seconds to prevent idle disconnect
+    this._deepgramKeepalive = setInterval(() => {
+      this._deepgramLive?.keepalive();
+    }, 8000);
+
+    console.log(`[Session:${this._id()}] Deepgram live STT initialized`);
+  }
 
   // ── System prompt ────────────────────────────────────────────────────────────
 
@@ -144,6 +182,7 @@ class CallSession extends EventEmitter {
       this._clearIdleTimers();
     }
 
+    // Barge-in detection (energy-based, applies regardless of STT path)
     if (this.state === 'processing' || this.state === 'speaking') {
       if (this.state === 'speaking') {
         const energy = mulawEnergy(base64Payload);
@@ -154,17 +193,31 @@ class CallSession extends EventEmitter {
             this._handleBargein(base64Payload);
           }
         } else {
-          this._bargeinCount = 0; // reset on silence — must be consecutive
+          this._bargeinCount = 0;
         }
       }
+      if (this._deepgramLive) this._deepgramLive.sendAudio(base64Payload);
       return;
     }
 
-    // Post-speech backoff: ignore audio briefly after AI finishes talking
+    // Post-speech backoff
     if (this._speakEndedAt && Date.now() - this._speakEndedAt < BARGEIN_BACKOFF_MS) {
+      if (this._deepgramLive) this._deepgramLive.sendAudio(base64Payload);
       return;
     }
 
+    // ── Deepgram live path ────────────────────────────────────────────────────
+    if (this._deepgramLive) {
+      if (process.env.RECORDING_ENABLED === 'true' && this.recordingBuffer.length < MAX_RECORDING_BUFFER) {
+        this.recordingBuffer.push(base64Payload);
+      }
+      this._deepgramLive.sendAudio(base64Payload);
+      const energy = mulawEnergy(base64Payload);
+      if (energy > ENERGY_THRESHOLD) this.state = 'listening';
+      return;
+    }
+
+    // ── Batch STT path (Groq Whisper) ─────────────────────────────────────────
     const energy = mulawEnergy(base64Payload);
     this.audioChunks.push(base64Payload);
     if (process.env.RECORDING_ENABLED === 'true' && this.recordingBuffer.length < MAX_RECORDING_BUFFER) {
@@ -222,12 +275,16 @@ class CallSession extends EventEmitter {
 
   handleMark(name) {
     if (name === 'tts_end' && this.state === 'speaking') {
-      this._speakEndedAt = Date.now(); // start backoff window
+      this._speakEndedAt = Date.now();
       this._bargeinCount = 0;
-      this.state = 'idle';
-      this.audioChunks = [];
-      this._startIdleTimer();
-      console.log(`[Session:${this._id()}] Speaking done → idle`);
+      // While greedy TTS is streaming, keep state=speaking for the next sentence.
+      // The pipeline sets _ttsStreaming=false before the last sentence's _speak returns.
+      if (!this._ttsStreaming) {
+        this.state = 'idle';
+        this.audioChunks = [];
+        this._startIdleTimer();
+        console.log(`[Session:${this._id()}] Speaking done → idle`);
+      }
     }
   }
 
@@ -339,15 +396,41 @@ class CallSession extends EventEmitter {
     const { publish } = require('./features/events');
     publish('call.transcript', { callId: this.callControlId, turn: this.turnCount, text: userText, role: 'user' });
 
-    // 3. LLM — collect full response (tools may require a second pass)
+    // 3. LLM — greedy: speak each sentence as it arrives, don't wait for full output.
+    //    Tool calls are rare and appear at the tail; if detected we abort greedy TTS.
     this.history.push({ role: 'user', content: userText });
 
     let rawOutput = '';
+    let toolCallSeen = false;
+    this._ttsStreaming = true;
+
+    // Promise chain: each sentence is appended and plays after the previous finishes.
+    // LLM continues generating while sentence N is being sent to Telnyx.
+    let speakChain = Promise.resolve();
+
     try {
       for await (const sentence of chatStream(this.history, this._systemPrompt)) {
         rawOutput += (rawOutput ? ' ' : '') + sentence;
+
+        if (sentence.includes('<tool_call>')) {
+          toolCallSeen = true;
+        }
+
+        if (!toolCallSeen) {
+          const s = sentence.trim();
+          if (s) {
+            speakChain = speakChain.then(async () => {
+              if (!this._ttsStreaming) return; // barge-in or tool call aborted
+              if (this.ws.readyState !== WebSocket.OPEN) return;
+              // Restore speaking state between sentences (handleMark may have cleared it)
+              if (this.state !== 'speaking') this.state = 'speaking';
+              await this._speak(s);
+            });
+          }
+        }
       }
     } catch (err) {
+      this._ttsStreaming = false;
       console.error(`[Session:${this._id()}] LLM error:`, err.message);
       this.state = 'idle';
       return;
@@ -359,8 +442,11 @@ class CallSession extends EventEmitter {
     let pendingAction = null;
 
     if (toolCalls.length > 0) {
+      // Abort any greedy TTS already queued
+      this._ttsStreaming = false;
+      if (this._cancelTts) this._cancelTts();
+
       const ctx = { callId: this.callControlId, phoneFrom: this.phoneFrom };
-      // Run all tool HTTP calls in parallel — independent requests benefit most
       const toolResults = await Promise.all(
         toolCalls.map(call =>
           executeTool(call.name, call.arguments || {}, ctx)
@@ -373,10 +459,8 @@ class CallSession extends EventEmitter {
 
         if (action) {
           pendingAction = { type: action, payload: actionPayload };
-          // Farewell from endCall becomes the spoken text
           if (action === 'endCall' && result && !finalText) finalText = result;
         } else {
-          // Inject tool result as user-context message (role:user avoids LLM compatibility issues)
           this.history.push({ role: 'user', content: `[Systeminfo – verktyg ${call.name} svarade]: ${result}` });
 
           let continuation = '';
@@ -388,41 +472,52 @@ class CallSession extends EventEmitter {
             console.warn(`[Session:${this._id()}] Tool continuation LLM error:`, err.message);
           }
 
-          // Strip any nested tool calls from continuation
           continuation = stripToolCalls(continuation).trim();
           if (continuation) finalText = (finalText ? finalText + ' ' : '') + continuation;
 
-          // Remove the injected system message to keep history clean
           this.history.pop();
-          // Instead record: tool result as assistant knowledge
           this.history.push({ role: 'assistant', content: `[${call.name}: ${result}]` });
         }
       }
+
+      if (!finalText) {
+        console.warn(`[Session:${this._id()}] Empty response after tools — skip TTS`);
+        this.state = 'idle';
+        return;
+      }
+
+      this.history.push({ role: 'assistant', content: finalText });
+      console.log(`[Session:${this._id()}] Agent (+${Date.now()-t0}ms): "${finalText.slice(0, 100)}"`);
+      if (this.history.length > MAX_HISTORY_PAIRS * 2) this.history = this.history.slice(-MAX_HISTORY_PAIRS * 2);
+
+      const { publish: publishTool } = require('./features/events');
+      publishTool('call.transcript', { callId: this.callControlId, turn: this.turnCount, text: finalText, role: 'assistant' });
+      this._fireConversationWebhook();
+      await this._speak(finalText);
+
+    } else {
+      // No tools — wait for the greedy TTS pipeline to drain
+      // Turn off streaming flag just before the last sentence starts so handleMark
+      // will transition to idle when that sentence's mark fires.
+      speakChain = speakChain.then(() => { this._ttsStreaming = false; });
+      await speakChain;
+      this._ttsStreaming = false; // safety reset
+
+      if (!rawOutput.trim()) {
+        console.warn(`[Session:${this._id()}] Empty LLM response — skip`);
+        this.state = 'idle';
+        return;
+      }
+
+      this.history.push({ role: 'assistant', content: rawOutput.trim() });
+      console.log(`[Session:${this._id()}] Agent (+${Date.now()-t0}ms): "${rawOutput.slice(0, 100)}"`);
+      if (this.history.length > MAX_HISTORY_PAIRS * 2) this.history = this.history.slice(-MAX_HISTORY_PAIRS * 2);
+
+      const { publish } = require('./features/events');
+      publish('call.transcript', { callId: this.callControlId, turn: this.turnCount, text: rawOutput.trim(), role: 'assistant' });
+      this._fireConversationWebhook();
+      return; // TTS already ran via speakChain
     }
-
-    if (!finalText) {
-      console.warn(`[Session:${this._id()}] Empty response after tools — skip TTS`);
-      this.state = 'idle';
-      return;
-    }
-
-    // Record final assistant turn
-    this.history.push({ role: 'assistant', content: finalText });
-    console.log(`[Session:${this._id()}] Agent (+${Date.now()-t0}ms): "${finalText.slice(0, 100)}"`);
-
-    // Trim history to prevent unbounded growth
-    if (this.history.length > MAX_HISTORY_PAIRS * 2) {
-      this.history = this.history.slice(-MAX_HISTORY_PAIRS * 2);
-    }
-
-    const { publish } = require('./features/events');
-    publish('call.transcript', { callId: this.callControlId, turn: this.turnCount, text: finalText, role: 'assistant' });
-
-    // Fire real-time conversation webhook (non-blocking)
-    this._fireConversationWebhook();
-
-    // 5. TTS
-    await this._speak(finalText);
 
     // 6. Execute pending action AFTER speaking
     if (pendingAction) {
@@ -454,7 +549,7 @@ class CallSession extends EventEmitter {
     // Estimate from text length: ~65ms per char for Edge TTS at 8kHz mulaw.
     const playbackMs = Math.ceil(text.length * 65) + 5000;
     const fallbackTimer = setTimeout(() => {
-      if (this.state === 'speaking') {
+      if (this.state === 'speaking' && !this._ttsStreaming) {
         console.warn(`[Session:${this._id()}] Mark echo timeout — forcing idle`);
         this.state = 'idle';
         this.audioChunks = [];
@@ -484,8 +579,11 @@ class CallSession extends EventEmitter {
 
     // Note: _startIdleTimer is called from handleMark('tts_end').
     // The fallback timer above handles the case where the mark never arrives.
-    if (this.state === 'speaking') this.state = 'idle';
-    this.audioChunks = [];
+    // While greedy TTS streaming, stay in 'speaking' — pipeline manages transitions.
+    if (this.state === 'speaking' && !this._ttsStreaming) {
+      this.state = 'idle';
+      this.audioChunks = [];
+    }
   }
 
   // Telnyx-native TTS fallback (REST action — no Edge TTS / ffmpeg needed)
@@ -544,6 +642,7 @@ class CallSession extends EventEmitter {
 
   _handleBargein(firstChunk) {
     console.log(`[Session:${this._id()}] Barge-in detected`);
+    this._ttsStreaming = false; // abort greedy TTS pipeline
     this._clearIdleTimers();
     if (this._cancelTts) this._cancelTts();
     this.state = 'listening';
@@ -661,6 +760,17 @@ class CallSession extends EventEmitter {
     clearTimeout(this.silenceTimer);
     this._clearIdleTimers();
     if (this._cancelTts) this._cancelTts();
+    this._ttsStreaming = false;
+
+    // Close Deepgram live session if active
+    if (this._deepgramKeepalive) {
+      clearInterval(this._deepgramKeepalive);
+      this._deepgramKeepalive = null;
+    }
+    if (this._deepgramLive) {
+      this._deepgramLive.close();
+      this._deepgramLive = null;
+    }
 
     const durationSec = Math.round((Date.now() - this.startTime) / 1000);
     const costUsd     = this._calculateCost(durationSec);

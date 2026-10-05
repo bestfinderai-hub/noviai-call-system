@@ -64,10 +64,16 @@ function streamToWebSocket(text, telnyxWs) {
     if (cancelled) return;
 
     // ── 2. Spawn ffmpeg: MP3 → raw mulaw 8 kHz mono ───────────────────────────
+    // AMBIENT_NOISE=true adds very faint pink noise (~-34 dB) to simulate an
+    // office environment — makes the AI sound less "studio perfect" on cold calls.
+    const ambientFilter = process.env.AMBIENT_NOISE === 'true'
+      ? 'highpass=f=200,lowpass=f=3400,volume=1.3,aeval=\'val(0)+0.006*random(0)\':c=same'
+      : 'highpass=f=200,lowpass=f=3400,volume=1.3';
+
     const ff = spawn(ffmpegPath, [
       '-hide_banner', '-loglevel', 'error',
       '-i', 'pipe:0',
-      '-af', 'highpass=f=200,lowpass=f=3400,volume=1.3',
+      '-af', ambientFilter,
       '-f', 'mulaw', '-ar', '8000', '-ac', '1',
       'pipe:1',
     ]);
