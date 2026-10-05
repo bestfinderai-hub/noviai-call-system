@@ -67,6 +67,7 @@ function streamToWebSocket(text, telnyxWs) {
     const ff = spawn(ffmpegPath, [
       '-hide_banner', '-loglevel', 'error',
       '-i', 'pipe:0',
+      '-af', 'highpass=f=200,lowpass=f=3400,volume=1.3',
       '-f', 'mulaw', '-ar', '8000', '-ac', '1',
       'pipe:1',
     ]);
