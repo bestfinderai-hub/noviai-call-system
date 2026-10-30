@@ -1899,7 +1899,7 @@ function parseBulkCsv(input) {
       .map(l => l.split(/[,;\\t]/)[col]?.trim().replace(/['"/]/g,'') || '')
       .filter(Boolean);
     const existing = document.getElementById('bulk-numbers').value.trim();
-    document.getElementById('bulk-numbers').value = (existing ? existing + '\n' : '') + numbers.join('\n');
+    document.getElementById('bulk-numbers').value = (existing ? existing + '\\n' : '') + numbers.join('\\n');
     updateBulkCount();
     toast('CSV importerad', \`\${numbers.length} rader inlästa\`);
   };
