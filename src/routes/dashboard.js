@@ -705,9 +705,6 @@ kbd{background:var(--surface2);border:1px solid var(--border2);border-radius:4px
       </div>
     </div>
 
-  </div>
-</div>
-
     <!-- ═══ SMS SEND ════════════════════════════════════════════════════════ -->
     <div class="page" id="page-sms">
       <div class="page-header">
@@ -914,6 +911,9 @@ kbd{background:var(--surface2);border:1px solid var(--border2);border-radius:4px
         </table>
       </div>
     </div>
+
+  </div><!-- /#main -->
+</div><!-- /#app -->
 
 <!-- Transcript Modal -->
 <div class="modal-overlay" id="modal">
