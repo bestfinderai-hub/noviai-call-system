@@ -4,6 +4,7 @@ const express   = require('express');
 const { createVerify, createPublicKey } = require('crypto');
 const rateLimit = require('express-rate-limit');
 const router    = express.Router();
+const { saveIncomingSms } = require('./services/sms');
 
 const TELNYX_BASE = 'https://api.telnyx.com/v2';
 
@@ -305,6 +306,12 @@ function createWebhookRouter(sessions, callMeta) {
         case 'call.streaming.stopped':
           console.log('[Webhook] Audio streaming stopped');
           break;
+        case 'message.received': {
+          const { from, to, text } = payload;
+          await saveIncomingSms(from?.phone_number || from, to?.[0]?.phone_number || to, text, 'telnyx');
+          console.log(`[Webhook] Incoming SMS from ${(from?.phone_number || from || '').slice(-4)}`);
+          break;
+        }
         default:
           break;
       }

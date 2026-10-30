@@ -12,7 +12,7 @@ function pool() {
   if (_pool) return _pool;
   const url = process.env.NOVA_DATABASE_URL || process.env.AICHATT_DATABASE_URL;
   if (!url) throw new Error('No database URL — set NOVA_DATABASE_URL in .env');
-  _pool = new Pool({ connectionString: url, ssl: { rejectUnauthorized: false }, max: 5 });
+  _pool = new Pool({ connectionString: url, ssl: { rejectUnauthorized: false }, max: 5, statement_timeout: 10_000 });
   _pool.on('error', err => console.error('[DB] Pool error:', err.message));
   return _pool;
 }
@@ -55,6 +55,33 @@ ALTER TABLE novai_calls ADD COLUMN IF NOT EXISTS cost_usd           NUMERIC(8,4)
 ALTER TABLE novai_calls ADD COLUMN IF NOT EXISTS recording_url      TEXT;
 ALTER TABLE novai_calls ADD COLUMN IF NOT EXISTS lead_status        TEXT;
 ALTER TABLE novai_calls ADD COLUMN IF NOT EXISTS lead_note          TEXT;
+
+-- SMS table
+CREATE TABLE IF NOT EXISTS novai_sms (
+  id           SERIAL PRIMARY KEY,
+  direction    TEXT NOT NULL DEFAULT 'out',
+  phone_to     TEXT,
+  phone_from   TEXT,
+  message      TEXT NOT NULL,
+  status       TEXT DEFAULT 'pending',
+  provider     TEXT,
+  provider_id  TEXT,
+  error        TEXT,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  delivered_at TIMESTAMPTZ
+);
+-- GDPR opt-out: numbers that have replied STOPP or been manually blocked
+CREATE TABLE IF NOT EXISTS novai_sms_opted_out (
+  phone      TEXT PRIMARY KEY,
+  reason     TEXT DEFAULT 'STOPP',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_novai_sms_created   ON novai_sms(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_novai_sms_status    ON novai_sms(status);
+CREATE INDEX IF NOT EXISTS idx_novai_sms_phone_to  ON novai_sms(phone_to);
+CREATE INDEX IF NOT EXISTS idx_novai_sms_phone_from ON novai_sms(phone_from);
+CREATE INDEX IF NOT EXISTS idx_novai_sms_direction ON novai_sms(direction);
 `;
 
 async function initSchema() {

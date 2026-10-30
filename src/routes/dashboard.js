@@ -286,6 +286,9 @@ kbd{background:var(--surface2);border:1px solid var(--border2);border-radius:4px
     <div class="nav-item" onclick="nav('stats',this)"><span class="nav-icon">📊</span> Statistik</div>
     <div class="nav-section">Kampanjer</div>
     <div class="nav-item" onclick="nav('outbound',this)"><span class="nav-icon">📤</span> Ring ut</div>
+    <div class="nav-section">SMS</div>
+    <div class="nav-item" onclick="nav('sms',this)"><span class="nav-icon">💬</span> Skicka SMS</div>
+    <div class="nav-item" onclick="nav('smslog',this)"><span class="nav-icon">📱</span> SMS Logg <span class="nav-badge" id="sms-badge" style="display:none">0</span></div>
     <div class="nav-section">Verktyg</div>
     <div class="nav-item" onclick="nav('live',this)"><span class="nav-icon">🔴</span> Live Monitor <span class="nav-badge green" id="live-badge" style="display:none">0</span></div>
     <div class="nav-item" onclick="nav('ttstest',this)"><span class="nav-icon">🎧</span> TTS Test</div>
@@ -703,6 +706,98 @@ kbd{background:var(--surface2);border:1px solid var(--border2);border-radius:4px
   </div>
 </div>
 
+    <!-- ═══ SMS SEND ════════════════════════════════════════════════════════ -->
+    <div class="page" id="page-sms">
+      <div class="page-header">
+        <div class="page-title"><h2>Skicka SMS</h2><p>Android gateway (gratis) med Telnyx som fallback</p></div>
+        <div class="page-actions">
+          <button class="btn btn-ghost btn-sm" onclick="loadSmsDevice()">↻ Enhetsstatus</button>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="stat-card" id="sms-device-card">
+          <div class="stat-header"><span class="stat-label">Android Gateway</span><span class="stat-icon">📱</span></div>
+          <div class="stat-value" id="sms-device-status" style="font-size:18px">–</div>
+          <div class="stat-sub" id="sms-device-info">Laddar...</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-header"><span class="stat-label">Idag skickade</span><span class="stat-icon">📤</span></div>
+          <div class="stat-value green" id="sms-today-count">–</div>
+          <div class="stat-sub" id="sms-today-sub">Android / Telnyx</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px;border-color:rgba(74,222,128,.2)">
+        <div class="card-title"><span class="card-title-icon">🚫</span> Opt-out lista <span class="badge badge-gray" id="optout-count" style="margin-left:6px">–</span></div>
+        <div class="field-hint" style="margin-bottom:12px">Nummer som svarat STOPP eller manuellt blockerats. SMS skickas aldrig till dessa nummer.</div>
+        <div id="optout-list" style="font-size:12px;color:var(--muted);margin-bottom:12px">Laddar...</div>
+        <div class="input-with-btn">
+          <input type="text" id="optout-add-phone" placeholder="+46701234567" style="font-size:12px">
+          <button class="btn btn-danger btn-sm" onclick="addOptOut()">Blockera</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-title"><span class="card-title-icon">✉️</span> Nytt SMS</div>
+        <div class="grid2">
+          <div class="field">
+            <label>Till (E.164 format)</label>
+            <input type="text" id="sms-to" placeholder="+46701234567">
+          </div>
+          <div class="field">
+            <label>Provider</label>
+            <select id="sms-provider">
+              <option value="auto">Auto (Android → Telnyx fallback)</option>
+              <option value="android">Android Gateway (gratis)</option>
+              <option value="telnyx">Telnyx (~0.04 kr/SMS)</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Meddelande</label>
+          <textarea id="sms-message" style="min-height:100px" placeholder="Skriv ditt SMS här..." oninput="updateSmsCounter()"></textarea>
+          <div class="char-counter" id="sms-chars">0 / 160 tecken · 1 SMS</div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="sendSms(this)">💬 Skicka SMS</button>
+          <span class="save-msg" id="sms-send-status"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ SMS LOG ══════════════════════════════════════════════════════════ -->
+    <div class="page" id="page-smslog">
+      <div class="page-header">
+        <div class="page-title"><h2>SMS Logg</h2><p>Skickade och mottagna SMS</p></div>
+      </div>
+
+      <div class="grid4" style="margin-bottom:16px">
+        <div class="stat-card"><div class="stat-header"><span class="stat-label">Skickade totalt</span></div><div class="stat-value accent" id="sms-stat-out">–</div></div>
+        <div class="stat-card"><div class="stat-header"><span class="stat-label">Mottagna totalt</span></div><div class="stat-value blue" id="sms-stat-in">–</div></div>
+        <div class="stat-card"><div class="stat-header"><span class="stat-label">Via Android</span></div><div class="stat-value green" id="sms-stat-android">–</div></div>
+        <div class="stat-card"><div class="stat-header"><span class="stat-label">Misslyckade</span></div><div class="stat-value" id="sms-stat-failed" style="color:var(--red)">–</div></div>
+      </div>
+
+      <div class="table-toolbar">
+        <div class="table-toolbar-left">
+          <select id="smslog-dir" onchange="loadSmsLog()" style="width:160px">
+            <option value="">Alla riktningar</option>
+            <option value="out">Skickade</option>
+            <option value="in">Mottagna</option>
+          </select>
+          <input type="text" id="smslog-phone" placeholder="🔍 Filtrera nummer..." style="width:200px">
+          <button class="btn btn-ghost btn-sm" onclick="loadSmsLog()">↻ Ladda</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tid</th><th>Riktning</th><th>Nummer</th><th>Meddelande</th><th>Status</th><th>Provider</th></tr></thead>
+          <tbody id="smslog-body"><tr class="loading-row"><td colspan="6">Klicka Ladda för att hämta SMS</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
 <!-- Transcript Modal -->
 <div class="modal-overlay" id="modal">
   <div class="modal">
@@ -802,6 +897,10 @@ function nav(id, el) {
   if (id === 'stats') loadStats();
   if (id === 'overview') startOverviewPolling();
   else stopOverviewPolling();
+  if (id === 'live' || id === 'webhooklog') {
+    startSse();
+    if (id === 'webhooklog') loadWebhookLog();
+  }
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────
@@ -825,6 +924,7 @@ async function initDashboard() {
   fillForms(c);
   loadOverview();
   startOverviewPolling();
+  startSse();
 }
 
 function fillForms(c) {
@@ -1312,9 +1412,15 @@ let _sse = null;
 let _liveTranscripts = {}; // callId → [{role,text}]
 let _activeCallsMap = {};
 
-function startSse() {
+async function startSse() {
   if (_sse) return;
-  _sse = new EventSource(BASE + '/admin/events?token=' + encodeURIComponent(TOKEN));
+  // Fetch a short-lived SSE token — admin token never goes in URL/logs
+  const tokenRes = await api('/admin/sse-token');
+  if (!tokenRes?.token) {
+    document.getElementById('sse-status').innerHTML = '<span style="color:var(--red)">● Token-fel</span>';
+    return;
+  }
+  _sse = new EventSource(BASE + '/admin/events?t=' + encodeURIComponent(tokenRes.token));
 
   _sse.onopen = () => {
     document.getElementById('sse-status').innerHTML = '<span style="color:var(--green)">● Ansluten</span>';
@@ -1322,6 +1428,7 @@ function startSse() {
 
   _sse.onerror = () => {
     document.getElementById('sse-status').innerHTML = '<span style="color:var(--red)">● Frånkopplad — försöker igen...</span>';
+    _sse = null; // allow reconnect on next nav
   };
 
   _sse.onmessage = (e) => {
@@ -1510,22 +1617,150 @@ function renderWebhookLog() {
   }).join('');
 }
 
-// ── Patch nav() to start SSE + load webhook log ──────────────────────────────
+// ── SMS ────────────────────────────────────────────────────────────────────────
 
-const _origNav = nav;
-function nav(id, el) {
-  _origNav(id, el);
-  if (id === 'live' || id === 'webhooklog') {
-    startSse();
-    if (id === 'webhooklog') loadWebhookLog();
+function updateSmsCounter() {
+  const msg = document.getElementById('sms-message').value;
+  const len = msg.length;
+  const hasNonGsm = /[^\x00-\x7F€£¥èéùìòÇØøÅåÆæßÉÄÖÑÜ§äöñüà]/.test(msg);
+  const segSize  = hasNonGsm ? 70 : 160;
+  const concatSz = hasNonGsm ? 67 : 153;
+  const segments = len === 0 ? 1 : (len <= segSize ? 1 : Math.ceil(len / concatSz));
+  const el = document.getElementById('sms-chars');
+  el.textContent = \`\${len} tecken · \${segments} SMS\${hasNonGsm ? ' ⚠ Unicode (emoji/tecken) — max 70/segment' : ''}\`;
+  el.className = 'char-counter' + (len > segSize ? ' warn' : '') + (len > 1600 ? ' over' : '');
+}
+
+async function sendSms(btn) {
+  const to  = document.getElementById('sms-to').value.trim();
+  const msg = document.getElementById('sms-message').value.trim();
+  const prov = document.getElementById('sms-provider').value;
+  if (!to || !msg) { toast('Fyll i nummer och meddelande', '', 'error'); return; }
+
+  await withLoading(btn, async () => {
+    const res = await api('/sms/send', 'POST', { to, message: msg, provider: prov });
+    if (!res || res._err || !res.ok) {
+      showMsg('sms-send-status', res?.error || 'Fel', false);
+      toast('SMS misslyckades', res?.error || '', 'error');
+    } else {
+      showMsg('sms-send-status', \`Skickat via \${res.provider || prov}\`);
+      toast('SMS skickat!', \`→ \${to}\`);
+      document.getElementById('sms-message').value = '';
+      updateSmsCounter();
+      loadSmsStats();
+    }
+  });
+}
+
+async function loadSmsDevice() {
+  const res = await api('/sms/device');
+  const statusEl = document.getElementById('sms-device-status');
+  const infoEl   = document.getElementById('sms-device-info');
+  if (!res || res._err) {
+    statusEl.innerHTML = '<span style="color:var(--red)">● Offline</span>';
+    infoEl.textContent = 'Kan inte nå Android gateway';
+    return;
+  }
+  const d = res.device;
+  if (!d) {
+    statusEl.innerHTML = '<span style="color:var(--yellow)">● Ej konfigurerad</span>';
+    infoEl.textContent = 'Sätt ANDROID_GATEWAY_URL i .env';
+    return;
+  }
+  if (d.online) {
+    statusEl.innerHTML = '<span style="color:var(--green)">● Online</span>';
+    const battery = d.battery != null ? \` · 🔋 \${d.battery}%\` : '';
+    infoEl.textContent = (d.name || 'Android') + battery;
+  } else {
+    statusEl.innerHTML = '<span style="color:var(--red)">● Offline</span>';
+    infoEl.textContent = d.status ? \`HTTP \${d.status}\` : 'Ej nåbar';
   }
 }
 
-// Auto-start SSE when dashboard loads
-const _origInit = initDashboard;
-async function initDashboard() {
-  await _origInit();
-  startSse();
+async function loadSmsStats() {
+  const res = await api('/sms/stats');
+  if (!res?.ok) return;
+  const s = res.stats;
+  document.getElementById('sms-today-count').textContent = s.today_out || '0';
+  document.getElementById('sms-today-sub').textContent   = \`Android: \${s.via_android||0} · Telnyx: \${s.via_telnyx||0}\`;
+  document.getElementById('sms-stat-out').textContent     = s.total_out   || '0';
+  document.getElementById('sms-stat-in').textContent      = s.total_in    || '0';
+  document.getElementById('sms-stat-android').textContent = s.via_android || '0';
+  document.getElementById('sms-stat-failed').textContent  = s.total_failed|| '0';
+
+  const badge = document.getElementById('sms-badge');
+  if (s.today_out > 0) { badge.textContent = s.today_out; badge.style.display = ''; }
+}
+
+async function loadSmsLog() {
+  const dir   = document.getElementById('smslog-dir').value;
+  const phone = document.getElementById('smslog-phone').value.trim();
+  const tbody = document.getElementById('smslog-body');
+  tbody.innerHTML = '<tr class="loading-row"><td colspan="6"><span class="spinner"></span></td></tr>';
+
+  let url = '/sms/logs?limit=50';
+  if (dir)   url += \`&direction=\${encodeURIComponent(dir)}\`;
+  if (phone) url += \`&phone=\${encodeURIComponent(phone)}\`;
+
+  const res = await api(url);
+  if (!res?.ok || !res.sms?.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="6"><span class="empty-icon">💬</span>Inga SMS ännu</td></tr>';
+    return;
+  }
+
+  const statusBadge = s => {
+    if (s === 'sent' || s === 'delivered' || s === 'received') return \`<span class="badge badge-green">\${s}</span>\`;
+    if (s === 'failed') return \`<span class="badge badge-red">\${s}</span>\`;
+    return \`<span class="badge badge-gray">\${s}</span>\`;
+  };
+
+  tbody.innerHTML = res.sms.map(r => {
+    const ts   = new Date(r.created_at).toLocaleString('sv-SE', { hour12: false }).slice(0, 16);
+    const dir  = r.direction === 'in' ? '← In' : '→ Ut';
+    const num  = esc(r.direction === 'in' ? (r.phone_from||'?') : (r.phone_to||'?'));
+    const msg  = esc((r.message||'').slice(0, 60)) + (r.message?.length > 60 ? '…' : '');
+    const prov = r.provider === 'android' ? '<span class="badge badge-green">Android</span>' : r.provider === 'telnyx' ? '<span class="badge badge-blue">Telnyx</span>' : '<span class="badge badge-gray">–</span>';
+    return \`<tr><td>\${ts}</td><td>\${dir}</td><td style="font-family:monospace">\${num}</td><td>\${msg}</td><td>\${statusBadge(r.status)}</td><td>\${prov}</td></tr>\`;
+  }).join('');
+}
+
+async function loadOptOut() {
+  const res = await api('/sms/opted-out');
+  const listEl  = document.getElementById('optout-list');
+  const countEl = document.getElementById('optout-count');
+  if (!res?.ok) { listEl.textContent = 'Kunde inte hämta opt-out lista'; return; }
+  const blocked = res.blocked || [];
+  countEl.textContent = blocked.length;
+  if (!blocked.length) { listEl.textContent = 'Inga blockerade nummer.'; return; }
+  listEl.innerHTML = blocked.map(b =>
+    \`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
+      <span style="font-family:monospace;flex:1">\${esc(b.phone)}</span>
+      <span style="color:var(--muted);font-size:11px">\${esc(b.reason)}</span>
+      <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px" onclick="removeOptOut('\${esc(b.phone)}')">↩ Ta bort</button>
+    </div>\`
+  ).join('');
+}
+
+async function addOptOut() {
+  const phone = document.getElementById('optout-add-phone').value.trim();
+  if (!phone) return;
+  const res = await api('/sms/opted-out', 'POST', { phone, reason: 'manual' });
+  if (res?.ok) { document.getElementById('optout-add-phone').value = ''; toast('Nummer blockerat', phone); loadOptOut(); }
+  else toast('Fel', res?.error || '', 'error');
+}
+
+async function removeOptOut(phone) {
+  const res = await api('/sms/opted-out/' + encodeURIComponent(phone), 'DELETE');
+  if (res?.ok) { toast('Opt-out borttagen', phone); loadOptOut(); }
+  else toast('Fel', res?.error || '', 'error');
+}
+
+// Patch nav to load SMS data on navigation
+const _navWithSms = nav;
+function nav(id, el) {
+  _navWithSms(id, el);
+  if (id === 'sms')    { loadSmsDevice(); loadSmsStats(); loadOptOut(); }
+  if (id === 'smslog') { loadSmsStats(); loadSmsLog(); }
 }
 <\/script>
 </body>

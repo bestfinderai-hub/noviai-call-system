@@ -63,8 +63,46 @@ function requireToken(req, res, next) {
   next();
 }
 
+// ── Short-lived SSE tokens ────────────────────────────────────────────────────
+// Avoids exposing the long-lived admin token in URL query params and server logs.
+// EventSource cannot send custom headers, so we issue a 60-second token via API.
+const _sseTokens = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [t, exp] of _sseTokens) if (exp < now) _sseTokens.delete(t);
+}, 60_000);
+
+// Defined BEFORE requireToken — EventSource connections use short-lived token, not Bearer.
+router.get('/events', (req, res) => {
+  const t = req.query.t || '';
+  const expiry = _sseTokens.get(t);
+  if (!expiry || expiry < Date.now()) {
+    _sseTokens.delete(t);
+    return res.status(401).end();
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const { subscribe } = require('../features/events');
+  const unsub = subscribe(res);
+  const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 20_000);
+  req.on('close', () => { unsub(); clearInterval(ping); });
+});
+
 router.use(requireToken);
 router.use(express.json({ limit: '64kb' }));
+
+// GET /admin/sse-token — issue a 60-second SSE access token (requires admin auth)
+router.get('/sse-token', (_req, res) => {
+  const { randomBytes } = require('crypto');
+  const token = randomBytes(24).toString('base64url');
+  _sseTokens.set(token, Date.now() + 60_000);
+  res.json({ token, expiresIn: 60 });
+});
 
 // ── In-memory config ──────────────────────────────────────────────────────────
 
@@ -552,25 +590,6 @@ router.delete('/batch-calls/:batchId', (req, res) => {
   const ok = cancelBatch(req.params.batchId?.slice(0, 36));
   if (!ok) return res.status(400).json({ error: 'Batch not found or already finished' });
   res.json({ ok: true, cancelled: true });
-});
-
-// ── GET /admin/events (SSE) ───────────────────────────────────────────────────
-// Server-Sent Events stream — call lifecycle + webhook events for live dashboard.
-
-router.get('/events', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
-
-  const { subscribe } = require('../features/events');
-  const unsub = subscribe(res);
-
-  // Keepalive ping every 20s to prevent proxy timeout
-  const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 20_000);
-
-  req.on('close', () => { unsub(); clearInterval(ping); });
 });
 
 // ── GET /admin/webhook-log ────────────────────────────────────────────────────

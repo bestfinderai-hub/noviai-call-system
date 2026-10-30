@@ -12,6 +12,7 @@ const { warmup: warmupTts } = require('./services/tts');
 const { initSchema } = require('./db');
 const { router: adminRouter, setSessions } = require('./routes/admin');
 const { router: dashboardRouter } = require('./routes/dashboard');
+const { router: smsRouter } = require('./routes/sms');
 
 // ── App setup ────────────────────────────────────────────────────────────────
 
@@ -143,6 +144,7 @@ server.on('upgrade', (req, socket, head) => {
 app.use('/webhooks/telnyx', createWebhookRouter(sessions, callMeta));
 app.use('/admin', adminRouter);
 app.use('/dashboard', dashboardRouter);
+app.use('/sms', smsRouter);
 
 // Root status page
 app.get('/', (_req, res) => {
@@ -285,6 +287,39 @@ async function start() {
     for (const session of sessions.values()) session.cleanup();
     server.close(() => process.exit(0));
   });
+
+  scheduleRetentionCleanup();
+}
+
+// ── GDPR SMS retention cleanup ────────────────────────────────────────────────
+// Deletes SMS records older than SMS_RETENTION_DAYS (default 90).
+// Runs daily. Set SMS_RETENTION_DAYS=0 to disable.
+
+async function runRetentionCleanup() {
+  const days = parseInt(process.env.SMS_RETENTION_DAYS ?? '90', 10);
+  if (!days) return;
+  const { query } = require('./db');
+  try {
+    const result = await query(
+      'DELETE FROM novai_sms WHERE created_at < NOW() - make_interval(days => $1)',
+      [days]
+    );
+    if (result.rowCount > 0) {
+      console.log(`[Retention] Deleted ${result.rowCount} SMS older than ${days} days`);
+    }
+  } catch (err) {
+    console.error('[Retention] SMS cleanup failed:', err.message);
+  }
+}
+
+function scheduleRetentionCleanup() {
+  const dbUrl = process.env.NOVA_DATABASE_URL || process.env.AICHATT_DATABASE_URL;
+  if (!dbUrl) return;
+  // Run 5 min after startup (let DB settle), then every 24h
+  setTimeout(() => {
+    runRetentionCleanup();
+    setInterval(runRetentionCleanup, 24 * 60 * 60 * 1000);
+  }, 5 * 60 * 1000);
 }
 
 start();
