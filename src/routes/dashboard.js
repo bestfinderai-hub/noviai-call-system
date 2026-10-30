@@ -288,7 +288,7 @@ kbd{background:var(--surface2);border:1px solid var(--border2);border-radius:4px
     <div class="nav-item" onclick="nav('outbound',this)"><span class="nav-icon">📤</span> Ring ut</div>
     <div class="nav-section">SMS</div>
     <div class="nav-item" onclick="nav('sms',this)"><span class="nav-icon">💬</span> Skicka SMS</div>
-    <div class="nav-item" onclick="nav('smsbulk',this)"><span class="nav-icon">📢</span> SMS Kampanj</div>
+
     <div class="nav-item" onclick="nav('smslog',this)"><span class="nav-icon">📋</span> SMS Logg <span class="nav-badge" id="sms-badge" style="display:none">0</span></div>
     <div class="nav-item" onclick="nav('smssetup',this)"><span class="nav-icon">📱</span> Android Setup</div>
     <div class="nav-section">Verktyg</div>
@@ -727,104 +727,110 @@ kbd{background:var(--surface2);border:1px solid var(--border2);border-radius:4px
         </div>
       </div>
 
+      <!-- Mode toggle -->
+      <div style="display:flex;gap:0;margin-top:20px;margin-bottom:0;border:1px solid var(--border2);border-radius:10px;overflow:hidden;width:fit-content">
+        <button id="sms-tab-single" class="btn btn-primary" style="border-radius:0;border:none;padding:9px 20px;font-size:13px" onclick="setSmsMode('single')">✉️ Enskilt nummer</button>
+        <button id="sms-tab-bulk"   class="btn btn-ghost"   style="border-radius:0;border:none;border-left:1px solid var(--border2);padding:9px 20px;font-size:13px" onclick="setSmsMode('bulk')">📋 Lista / CSV-upload</button>
+      </div>
+
+      <!-- ── Enskilt nummer ── -->
+      <div id="sms-mode-single">
+        <div class="card" style="margin-top:16px">
+          <div class="card-title"><span class="card-title-icon">✉️</span> Nytt SMS</div>
+          <div class="grid2">
+            <div class="field">
+              <label>Till (E.164 format)</label>
+              <input type="text" id="sms-to" placeholder="+46701234567">
+            </div>
+            <div class="field">
+              <label>Provider</label>
+              <select id="sms-provider">
+                <option value="auto">Auto (Android → Telnyx fallback)</option>
+                <option value="android">Android Gateway (gratis)</option>
+                <option value="telnyx">Telnyx (~0.04 kr/SMS)</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Meddelande</label>
+            <textarea id="sms-message" style="min-height:100px" placeholder="Skriv ditt SMS här..." oninput="updateSmsCounter()"></textarea>
+            <div class="char-counter" id="sms-chars">0 / 160 tecken · 1 SMS</div>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="sendSms(this)">💬 Skicka SMS</button>
+            <span class="save-msg" id="sms-send-status"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Lista / CSV ── -->
+      <div id="sms-mode-bulk" style="display:none">
+        <div class="card" style="margin-top:16px">
+          <div class="card-title"><span class="card-title-icon">📋</span> Mottagarlista</div>
+          <div class="field-hint" style="margin-bottom:12px">
+            Klistra in nummer (ett per rad eller kommaseparerat) <strong>eller</strong> ladda upp en CSV-fil med en kolumn som heter <code>phone</code>, <code>number</code> eller <code>nummer</code>.
+          </div>
+          <div class="btn-row" style="margin-bottom:12px;margin-top:0">
+            <label class="btn btn-ghost btn-sm" style="cursor:pointer">
+              📂 Ladda upp CSV
+              <input type="file" id="bulk-csv-input" accept=".csv,.txt" style="display:none" onchange="parseBulkCsv(this)">
+            </label>
+            <button class="btn btn-ghost btn-sm" onclick="clearBulkList()">✕ Rensa lista</button>
+            <span id="bulk-count-label" style="font-size:12px;color:var(--muted2);margin-left:4px"></span>
+          </div>
+          <textarea id="bulk-numbers" placeholder="+46701234567&#10;+46709876543&#10;+46731112233" style="min-height:160px;font-family:monospace;font-size:12px" oninput="updateBulkCount()"></textarea>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-title"><span class="card-title-icon">✉️</span> Meddelande &amp; inställningar</div>
+          <div class="grid2">
+            <div class="field">
+              <label>Provider</label>
+              <select id="bulk-provider">
+                <option value="auto">Auto (Android → Telnyx fallback)</option>
+                <option value="android">Android Gateway (gratis)</option>
+                <option value="telnyx">Telnyx (~0.04 kr/SMS)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Fördröjning mellan SMS (ms)</label>
+              <input type="number" id="bulk-delay" value="500" min="0" max="10000">
+              <div class="field-hint">500 ms rekommenderas för Android</div>
+            </div>
+          </div>
+          <div class="field">
+            <label>Meddelande</label>
+            <textarea id="bulk-message" style="min-height:120px" placeholder="Skriv ditt SMS här..." oninput="updateBulkCounter()"></textarea>
+            <div class="char-counter" id="bulk-chars">0 tecken · 1 SMS per mottagare</div>
+          </div>
+          <div id="bulk-preview" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;display:none">
+            <strong style="color:var(--accent)">Förhandsgranskning</strong><br>
+            <span id="bulk-preview-text" style="color:var(--muted2)"></span>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="startBulkSms(this)" id="bulk-send-btn">📢 Starta utskick</button>
+            <span class="save-msg" id="bulk-status"></span>
+          </div>
+        </div>
+
+        <div class="card" id="bulk-result-card" style="margin-top:16px;display:none">
+          <div class="card-title"><span class="card-title-icon">📊</span> Resultat</div>
+          <div class="grid3" id="bulk-result-stats"></div>
+        </div>
+      </div>
+
       <div class="card" style="margin-top:16px;border-color:rgba(74,222,128,.2)">
         <div class="card-title"><span class="card-title-icon">🚫</span> Opt-out lista <span class="badge badge-gray" id="optout-count" style="margin-left:6px">–</span></div>
-        <div class="field-hint" style="margin-bottom:12px">Nummer som svarat STOPP eller manuellt blockerats. SMS skickas aldrig till dessa nummer.</div>
+        <div class="field-hint" style="margin-bottom:12px">Nummer som svarat STOPP eller manuellt blockerats. SMS skickas aldrig till dessa.</div>
         <div id="optout-list" style="font-size:12px;color:var(--muted);margin-bottom:12px">Laddar...</div>
         <div class="input-with-btn">
           <input type="text" id="optout-add-phone" placeholder="+46701234567" style="font-size:12px">
           <button class="btn btn-danger btn-sm" onclick="addOptOut()">Blockera</button>
         </div>
       </div>
-
-      <div class="card" style="margin-top:16px">
-        <div class="card-title"><span class="card-title-icon">✉️</span> Nytt SMS</div>
-        <div class="grid2">
-          <div class="field">
-            <label>Till (E.164 format)</label>
-            <input type="text" id="sms-to" placeholder="+46701234567">
-          </div>
-          <div class="field">
-            <label>Provider</label>
-            <select id="sms-provider">
-              <option value="auto">Auto (Android → Telnyx fallback)</option>
-              <option value="android">Android Gateway (gratis)</option>
-              <option value="telnyx">Telnyx (~0.04 kr/SMS)</option>
-            </select>
-          </div>
-        </div>
-        <div class="field">
-          <label>Meddelande</label>
-          <textarea id="sms-message" style="min-height:100px" placeholder="Skriv ditt SMS här..." oninput="updateSmsCounter()"></textarea>
-          <div class="char-counter" id="sms-chars">0 / 160 tecken · 1 SMS</div>
-        </div>
-        <div class="btn-row">
-          <button class="btn btn-primary" onclick="sendSms(this)">💬 Skicka SMS</button>
-          <span class="save-msg" id="sms-send-status"></span>
-        </div>
-      </div>
     </div>
 
-    <!-- ═══ SMS KAMPANJ ═══════════════════════════════════════════════════════ -->
-    <div class="page" id="page-smsbulk">
-      <div class="page-header">
-        <div class="page-title"><h2>SMS Kampanj</h2><p>Skicka till en lista med nummer — CSV-upload eller klistra in</p></div>
-      </div>
-
-      <div class="card">
-        <div class="card-title"><span class="card-title-icon">📋</span> Mottagarlista</div>
-        <div class="field-hint" style="margin-bottom:12px">
-          Klistra in nummer (ett per rad eller kommaseparerat) <strong>eller</strong> ladda upp en CSV-fil med en kolumn som heter <code>phone</code> eller <code>number</code>.
-        </div>
-        <div class="btn-row" style="margin-bottom:12px">
-          <label class="btn btn-ghost btn-sm" style="cursor:pointer">
-            📂 Ladda upp CSV
-            <input type="file" id="bulk-csv-input" accept=".csv,.txt" style="display:none" onchange="parseBulkCsv(this)">
-          </label>
-          <button class="btn btn-ghost btn-sm" onclick="clearBulkList()">✕ Rensa lista</button>
-          <span id="bulk-count-label" style="font-size:12px;color:var(--muted2);margin-left:4px"></span>
-        </div>
-        <textarea id="bulk-numbers" placeholder="+46701234567&#10;+46709876543&#10;+46731112233" style="min-height:160px;font-family:monospace;font-size:12px" oninput="updateBulkCount()"></textarea>
-      </div>
-
-      <div class="card" style="margin-top:16px">
-        <div class="card-title"><span class="card-title-icon">✉️</span> Meddelande</div>
-        <div class="grid2">
-          <div class="field">
-            <label>Provider</label>
-            <select id="bulk-provider">
-              <option value="auto">Auto (Android → Telnyx fallback)</option>
-              <option value="android">Android Gateway (gratis)</option>
-              <option value="telnyx">Telnyx (~0.04 kr/SMS)</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Fördröjning mellan SMS (ms)</label>
-            <input type="number" id="bulk-delay" value="500" min="0" max="10000">
-            <div class="field-hint">500 ms rekommenderas för Android-gateway</div>
-          </div>
-        </div>
-        <div class="field">
-          <label>Meddelande</label>
-          <textarea id="bulk-message" style="min-height:120px" placeholder="Skriv ditt SMS här..." oninput="updateBulkCounter()"></textarea>
-          <div class="char-counter" id="bulk-chars">0 tecken · 1 SMS per mottagare</div>
-        </div>
-        <div id="bulk-preview" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;display:none">
-          <strong style="color:var(--accent)">Förhandsgranskning</strong><br>
-          <span id="bulk-preview-text" style="color:var(--muted2)"></span>
-        </div>
-        <div class="btn-row">
-          <button class="btn btn-primary" onclick="startBulkSms(this)" id="bulk-send-btn">📢 Starta kampanj</button>
-          <span class="save-msg" id="bulk-status"></span>
-        </div>
-      </div>
-
-      <div class="card" id="bulk-result-card" style="margin-top:16px;display:none">
-        <div class="card-title"><span class="card-title-icon">📊</span> Resultat</div>
-        <div class="grid3" id="bulk-result-stats"></div>
-        <div id="bulk-result-errors" style="margin-top:12px;font-size:12px;color:var(--red)"></div>
-      </div>
-    </div>
+    <!-- page-smsbulk redirect (nav() hanterar inte längre smsbulk) -->
 
     <!-- ═══ ANDROID SETUP ══════════════════════════════════════════════════════ -->
     <div class="page" id="page-smssetup">
@@ -1019,7 +1025,6 @@ function nav(id, el) {
     if (id === 'webhooklog') loadWebhookLog();
   }
   if (id === 'sms')      { loadSmsDevice(); loadSmsStats(); loadOptOut(); }
-  if (id === 'smsbulk')  { loadSmsDevice(); updateBulkCount(); }
   if (id === 'smslog')   { loadSmsStats(); loadSmsLog(); }
   if (id === 'smssetup') { loadSmsDevice(); }
 }
@@ -1837,6 +1842,17 @@ async function removeOptOut(phone) {
 }
 
 // ── Bulk SMS ──────────────────────────────────────────────────────────────────
+
+function setSmsMode(mode) {
+  const isBulk = mode === 'bulk';
+  document.getElementById('sms-mode-single').style.display = isBulk ? 'none' : '';
+  document.getElementById('sms-mode-bulk').style.display   = isBulk ? '' : 'none';
+  document.getElementById('sms-tab-single').className = 'btn btn-' + (isBulk ? 'ghost' : 'primary');
+  document.getElementById('sms-tab-bulk').className   = 'btn btn-' + (isBulk ? 'primary' : 'ghost');
+  document.getElementById('sms-tab-single').style.cssText = 'border-radius:0;border:none;padding:9px 20px;font-size:13px';
+  document.getElementById('sms-tab-bulk').style.cssText   = 'border-radius:0;border:none;border-left:1px solid var(--border2);padding:9px 20px;font-size:13px';
+  if (isBulk) updateBulkCount();
+}
 
 function parseBulkNumbers(raw) {
   return [...new Set(
