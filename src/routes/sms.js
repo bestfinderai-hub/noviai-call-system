@@ -68,7 +68,8 @@ router.post('/send', apiLimiter, sendLimiter, requireToken, express.json({ limit
     const result = await sendSms(to.trim(), message.trim(), { provider });
     res.json({ ok: true, ...result });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    console.error('[SMS] send error:', err);
+    res.status(500).json({ ok: false, error: 'Kunde inte skicka SMS' });
   }
 });
 
@@ -108,7 +109,8 @@ router.get('/logs', apiLimiter, requireToken, async (req, res) => {
     const rows = await query(sql, params);
     res.json({ ok: true, sms: rows.rows, limit, offset });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    console.error('[SMS] logs query error:', err);
+    res.status(500).json({ ok: false, error: 'Databasfel' });
   }
 });
 
@@ -177,7 +179,8 @@ router.get('/stats', apiLimiter, requireToken, async (req, res) => {
     `);
     res.json({ ok: true, stats: rows[0] });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+    console.error('[SMS] stats error:', err);
+    res.status(500).json({ ok: false, error: 'Databasfel' });
   }
 });
 
