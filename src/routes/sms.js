@@ -111,6 +111,54 @@ router.get('/logs', apiLimiter, requireToken, async (req, res) => {
   }
 });
 
+// ── Bulk send ─────────────────────────────────────────────────────────────────
+
+router.post('/bulk', apiLimiter, requireToken, express.json({ limit: '256kb' }), async (req, res) => {
+  const { numbers, message, provider, delayMs = 500 } = req.body || {};
+
+  if (!Array.isArray(numbers) || !numbers.length) {
+    return res.status(400).json({ error: 'numbers must be a non-empty array' });
+  }
+  if (numbers.length > 500) {
+    return res.status(400).json({ error: 'Max 500 numbers per batch' });
+  }
+  if (!message || typeof message !== 'string') {
+    return res.status(400).json({ error: 'Missing: message' });
+  }
+
+  // Normalize and validate all numbers upfront
+  const normalized = [];
+  const invalid    = [];
+  for (const n of numbers) {
+    const clean = String(n).replace(/\s/g, '');
+    if (/^\+\d{7,15}$/.test(clean)) normalized.push(clean);
+    else invalid.push(String(n).slice(0, 30));
+  }
+
+  // Deduplicate
+  const unique = [...new Set(normalized)];
+
+  res.json({ ok: true, total: unique.length, invalid, queued: true });
+
+  // Send in background with delay between each
+  const results = { sent: 0, failed: 0, opted_out: 0, errors: [] };
+  for (const to of unique) {
+    try {
+      await sendSms(to, message, { provider });
+      results.sent++;
+    } catch (err) {
+      if (err.message.includes('opted out')) {
+        results.opted_out++;
+      } else {
+        results.failed++;
+        if (results.errors.length < 20) results.errors.push({ to: to.slice(-4), error: err.message });
+      }
+    }
+    if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
+  }
+  console.log(`[SMS] Bulk done: ${results.sent} sent, ${results.failed} failed, ${results.opted_out} opted-out`);
+});
+
 // ── Stats ─────────────────────────────────────────────────────────────────────
 
 router.get('/stats', apiLimiter, requireToken, async (req, res) => {

@@ -288,7 +288,9 @@ kbd{background:var(--surface2);border:1px solid var(--border2);border-radius:4px
     <div class="nav-item" onclick="nav('outbound',this)"><span class="nav-icon">📤</span> Ring ut</div>
     <div class="nav-section">SMS</div>
     <div class="nav-item" onclick="nav('sms',this)"><span class="nav-icon">💬</span> Skicka SMS</div>
-    <div class="nav-item" onclick="nav('smslog',this)"><span class="nav-icon">📱</span> SMS Logg <span class="nav-badge" id="sms-badge" style="display:none">0</span></div>
+    <div class="nav-item" onclick="nav('smsbulk',this)"><span class="nav-icon">📢</span> SMS Kampanj</div>
+    <div class="nav-item" onclick="nav('smslog',this)"><span class="nav-icon">📋</span> SMS Logg <span class="nav-badge" id="sms-badge" style="display:none">0</span></div>
+    <div class="nav-item" onclick="nav('smssetup',this)"><span class="nav-icon">📱</span> Android Setup</div>
     <div class="nav-section">Verktyg</div>
     <div class="nav-item" onclick="nav('live',this)"><span class="nav-icon">🔴</span> Live Monitor <span class="nav-badge green" id="live-badge" style="display:none">0</span></div>
     <div class="nav-item" onclick="nav('ttstest',this)"><span class="nav-icon">🎧</span> TTS Test</div>
@@ -766,6 +768,121 @@ kbd{background:var(--surface2);border:1px solid var(--border2);border-radius:4px
       </div>
     </div>
 
+    <!-- ═══ SMS KAMPANJ ═══════════════════════════════════════════════════════ -->
+    <div class="page" id="page-smsbulk">
+      <div class="page-header">
+        <div class="page-title"><h2>SMS Kampanj</h2><p>Skicka till en lista med nummer — CSV-upload eller klistra in</p></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-icon">📋</span> Mottagarlista</div>
+        <div class="field-hint" style="margin-bottom:12px">
+          Klistra in nummer (ett per rad eller kommaseparerat) <strong>eller</strong> ladda upp en CSV-fil med en kolumn som heter <code>phone</code> eller <code>number</code>.
+        </div>
+        <div class="btn-row" style="margin-bottom:12px">
+          <label class="btn btn-ghost btn-sm" style="cursor:pointer">
+            📂 Ladda upp CSV
+            <input type="file" id="bulk-csv-input" accept=".csv,.txt" style="display:none" onchange="parseBulkCsv(this)">
+          </label>
+          <button class="btn btn-ghost btn-sm" onclick="clearBulkList()">✕ Rensa lista</button>
+          <span id="bulk-count-label" style="font-size:12px;color:var(--muted2);margin-left:4px"></span>
+        </div>
+        <textarea id="bulk-numbers" placeholder="+46701234567&#10;+46709876543&#10;+46731112233" style="min-height:160px;font-family:monospace;font-size:12px" oninput="updateBulkCount()"></textarea>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-title"><span class="card-title-icon">✉️</span> Meddelande</div>
+        <div class="grid2">
+          <div class="field">
+            <label>Provider</label>
+            <select id="bulk-provider">
+              <option value="auto">Auto (Android → Telnyx fallback)</option>
+              <option value="android">Android Gateway (gratis)</option>
+              <option value="telnyx">Telnyx (~0.04 kr/SMS)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Fördröjning mellan SMS (ms)</label>
+            <input type="number" id="bulk-delay" value="500" min="0" max="10000">
+            <div class="field-hint">500 ms rekommenderas för Android-gateway</div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Meddelande</label>
+          <textarea id="bulk-message" style="min-height:120px" placeholder="Skriv ditt SMS här..." oninput="updateBulkCounter()"></textarea>
+          <div class="char-counter" id="bulk-chars">0 tecken · 1 SMS per mottagare</div>
+        </div>
+        <div id="bulk-preview" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;display:none">
+          <strong style="color:var(--accent)">Förhandsgranskning</strong><br>
+          <span id="bulk-preview-text" style="color:var(--muted2)"></span>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="startBulkSms(this)" id="bulk-send-btn">📢 Starta kampanj</button>
+          <span class="save-msg" id="bulk-status"></span>
+        </div>
+      </div>
+
+      <div class="card" id="bulk-result-card" style="margin-top:16px;display:none">
+        <div class="card-title"><span class="card-title-icon">📊</span> Resultat</div>
+        <div class="grid3" id="bulk-result-stats"></div>
+        <div id="bulk-result-errors" style="margin-top:12px;font-size:12px;color:var(--red)"></div>
+      </div>
+    </div>
+
+    <!-- ═══ ANDROID SETUP ══════════════════════════════════════════════════════ -->
+    <div class="page" id="page-smssetup">
+      <div class="page-header">
+        <div class="page-title"><h2>Android Setup</h2><p>Konfigurera gratis SMS-gateway via Android-telefon</p></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span class="card-title-icon">1️⃣</span> Installera appen</div>
+        <p style="color:var(--muted2);font-size:13px;line-height:1.7;margin-bottom:12px">
+          Ladda ner <strong>android-sms-gateway</strong> (capcom6) — öppen källkod, 6000+ GitHub-stjärnor.
+        </p>
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:13px">
+          <div style="margin-bottom:8px">📥 <strong>APK:</strong> <span style="color:var(--accent);font-family:monospace">github.com/capcom6/android-sms-gateway/releases</span></div>
+          <div style="margin-bottom:8px">📖 <strong>Docs:</strong> <span style="font-family:monospace;color:var(--muted2)">docs.sms-gate.app</span></div>
+          <div>✅ Kräver Android 6.0+, ett aktivt SIM-kort med SMS-behörighet</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-title"><span class="card-title-icon">2️⃣</span> Starta Local Server i appen</div>
+        <ol style="color:var(--muted2);font-size:13px;line-height:2;padding-left:18px">
+          <li>Öppna appen på telefonen</li>
+          <li>Tryck på <strong>Local Server</strong> → aktivera</li>
+          <li>Notera IP-adressen och porten (t.ex. <code>192.168.1.100:8080</code>)</li>
+          <li>Sätt ett lösenord under <strong>Security</strong></li>
+          <li>Under <strong>Webhooks</strong> → lägg till din server-URL för inkommande SMS</li>
+        </ol>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-title"><span class="card-title-icon">3️⃣</span> Lägg till i .env</div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;font-family:monospace;font-size:12px;color:var(--muted2);line-height:2">
+          <span style="color:var(--muted)"># Lägg till dessa i din .env-fil</span><br>
+          <span style="color:var(--green)">ANDROID_GATEWAY_URL</span>=http://192.168.1.100:8080<br>
+          <span style="color:var(--green)">ANDROID_GATEWAY_USER</span>=user<br>
+          <span style="color:var(--green)">ANDROID_GATEWAY_PASS</span>=ditt-lösenord<br>
+          <span style="color:var(--green)">ANDROID_WEBHOOK_SECRET</span>=välj-en-hemlig-sträng<br>
+          <span style="color:var(--green)">SMS_PROVIDER</span>=auto
+        </div>
+        <div class="field-hint" style="margin-top:10px">
+          <strong>Utanför hemmanätverk?</strong> Skapa konto på <code>sms-gate.app</code> och använd <code>https://api.sms-gate.app</code> som URL istället.
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-title"><span class="card-title-icon">4️⃣</span> Testa anslutningen</div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="testAndroidConnection(this)">🔌 Testa nu</button>
+          <span id="android-test-result" style="font-size:13px;margin-left:8px"></span>
+        </div>
+        <div id="android-test-detail" style="margin-top:12px;font-size:12px;color:var(--muted2);font-family:monospace;display:none"></div>
+      </div>
+    </div>
+
     <!-- ═══ SMS LOG ══════════════════════════════════════════════════════════ -->
     <div class="page" id="page-smslog">
       <div class="page-header">
@@ -901,6 +1018,10 @@ function nav(id, el) {
     startSse();
     if (id === 'webhooklog') loadWebhookLog();
   }
+  if (id === 'sms')      { loadSmsDevice(); loadSmsStats(); loadOptOut(); }
+  if (id === 'smsbulk')  { loadSmsDevice(); updateBulkCount(); }
+  if (id === 'smslog')   { loadSmsStats(); loadSmsLog(); }
+  if (id === 'smssetup') { loadSmsDevice(); }
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────
@@ -1130,7 +1251,7 @@ async function loadCalls() {
   const r = await api('/admin/calls' + qs);
 
   if (!r || r._err) {
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="8"><span class="empty-icon">⚠️</span>Kunde inte hämta samtal — servern svarar inte</td></tr>';
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="8"><span class="empty-icon">⚠️</span>Kunde inte hämta samtal</td></tr>';
     return;
   }
   _callsCache = r.calls || [];
@@ -1143,20 +1264,25 @@ async function loadCalls() {
     return;
   }
   tbody.innerHTML = _callsCache.map(c => {
-    const dt    = new Date(c.started_at);
+    const dt = new Date(c.started_at);
     const dtStr = dt.toLocaleDateString('sv-SE') + ' ' + dt.toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'});
-    const dir   = c.direction === 'incoming'
-      ? '<span class="badge badge-blue">↙ in</span>'
-      : '<span class="badge badge-accent">↗ ut</span>';
+    const dir = c.direction === 'incoming' ? '<span class="badge badge-blue">↙ in</span>' : '<span class="badge badge-accent">↗ ut</span>';
+    const leadMenu = \`<select onchange="setLead('\${esc(c.call_id)}',this.value)" style="font-size:11px;padding:3px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text)">
+      <option value="">—</option>
+      <option value="interested" \${c.lead_status==='interested'?'selected':''}>⭐ Intresserad</option>
+      <option value="not_interested" \${c.lead_status==='not_interested'?'selected':''}>✗ Ej intresserad</option>
+      <option value="callback" \${c.lead_status==='callback'?'selected':''}>📅 Callback</option>
+      <option value="qualified" \${c.lead_status==='qualified'?'selected':''}>✓ Kvalificerad</option>
+    </select>\`;
     return \`<tr>
-      <td style="white-space:nowrap">\${dtStr}</td>
+      <td style="white-space:nowrap;font-size:12px">\${dtStr}</td>
       <td style="font-family:monospace;font-size:12px">\${esc(c.phone_from||'—')}</td>
-      <td style="font-family:monospace;font-size:12px">\${esc(c.phone_to||'—')}</td>
       <td>\${dir}</td>
       <td>\${c.duration_sec!=null?fmtDur(c.duration_sec):'—'}</td>
       <td>\${c.turn_count??'—'}</td>
       <td>\${causeBadge(c.hangup_cause)}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick="openTranscript('\${esc(c.call_id)}')">📋 Visa</button></td>
+      <td>\${leadMenu}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="openTranscript('\${esc(c.call_id)}')">📋</button></td>
     </tr>\`;
   }).join('');
 }
@@ -1360,51 +1486,6 @@ async function setLead(callId, status) {
   else toast('Fel', r?.error||'', 'error');
 }
 
-// Override loadCalls to include lead column
-const _origLoadCalls = loadCalls;
-async function loadCalls() {
-  const phone = document.getElementById('calls-phone-filter').value.trim();
-  const qs = phone ? '?phone=' + encodeURIComponent(phone) + '&limit=50' : '?limit=50';
-  const tbody = document.getElementById('calls-body');
-  tbody.innerHTML = '<tr class="loading-row"><td colspan="8"><span class="spinner" style="width:20px;height:20px"></span></td></tr>';
-  const r = await api('/admin/calls' + qs);
-
-  if (!r || r._err) {
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="8"><span class="empty-icon">⚠️</span>Kunde inte hämta samtal</td></tr>';
-    return;
-  }
-  _callsCache = r.calls || [];
-  const badge = document.getElementById('calls-badge');
-  if (_callsCache.length) { badge.textContent = _callsCache.length; badge.style.display = ''; }
-  else badge.style.display = 'none';
-
-  if (!_callsCache.length) {
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="8"><span class="empty-icon">📭</span>Inga samtal ännu</td></tr>';
-    return;
-  }
-  tbody.innerHTML = _callsCache.map(c => {
-    const dt = new Date(c.started_at);
-    const dtStr = dt.toLocaleDateString('sv-SE') + ' ' + dt.toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'});
-    const dir = c.direction === 'incoming' ? '<span class="badge badge-blue">↙ in</span>' : '<span class="badge badge-accent">↗ ut</span>';
-    const leadMenu = \`<select onchange="setLead('\${esc(c.call_id)}',this.value)" style="font-size:11px;padding:3px 6px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text)">
-      <option value="">—</option>
-      <option value="interested" \${c.lead_status==='interested'?'selected':''}>⭐ Intresserad</option>
-      <option value="not_interested" \${c.lead_status==='not_interested'?'selected':''}>✗ Ej intresserad</option>
-      <option value="callback" \${c.lead_status==='callback'?'selected':''}>📅 Callback</option>
-      <option value="qualified" \${c.lead_status==='qualified'?'selected':''}>✓ Kvalificerad</option>
-    </select>\`;
-    return \`<tr>
-      <td style="white-space:nowrap;font-size:12px">\${dtStr}</td>
-      <td style="font-family:monospace;font-size:12px">\${esc(c.phone_from||'—')}</td>
-      <td>\${dir}</td>
-      <td>\${c.duration_sec!=null?fmtDur(c.duration_sec):'—'}</td>
-      <td>\${c.turn_count??'—'}</td>
-      <td>\${causeBadge(c.hangup_cause)}</td>
-      <td>\${leadMenu}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick="openTranscript('\${esc(c.call_id)}')">📋</button></td>
-    </tr>\`;
-  }).join('');
-}
 
 // ── SSE Live Monitor ────────────────────────────────────────────────────────
 
@@ -1622,7 +1703,7 @@ function renderWebhookLog() {
 function updateSmsCounter() {
   const msg = document.getElementById('sms-message').value;
   const len = msg.length;
-  const hasNonGsm = /[^\x00-\x7F€£¥èéùìòÇØøÅåÆæßÉÄÖÑÜ§äöñüà]/.test(msg);
+  const hasNonGsm = msg.split('').some(c => { const cp = c.codePointAt(0); return cp > 127 && !'€£¥èéùìòÇØøÅåÆæßÉÄÖÑÜ§äöñüà'.includes(c); });
   const segSize  = hasNonGsm ? 70 : 160;
   const concatSz = hasNonGsm ? 67 : 153;
   const segments = len === 0 ? 1 : (len <= segSize ? 1 : Math.ceil(len / concatSz));
@@ -1755,13 +1836,154 @@ async function removeOptOut(phone) {
   else toast('Fel', res?.error || '', 'error');
 }
 
-// Patch nav to load SMS data on navigation
-const _navWithSms = nav;
-function nav(id, el) {
-  _navWithSms(id, el);
-  if (id === 'sms')    { loadSmsDevice(); loadSmsStats(); loadOptOut(); }
-  if (id === 'smslog') { loadSmsStats(); loadSmsLog(); }
+// ── Bulk SMS ──────────────────────────────────────────────────────────────────
+
+function parseBulkNumbers(raw) {
+  return [...new Set(
+    raw.split(/[\\n,;]+/)
+      .map(s => s.trim().replace(/\\s/g, ''))
+      .filter(s => /^\\+\\d{7,15}$/.test(s))
+  )];
 }
+
+function updateBulkCount() {
+  const nums = parseBulkNumbers(document.getElementById('bulk-numbers').value);
+  const label = document.getElementById('bulk-count-label');
+  label.textContent = nums.length ? \`\${nums.length} giltiga nummer\` : '';
+  updateBulkPreview();
+}
+
+function updateBulkCounter() {
+  const msg = document.getElementById('bulk-message').value;
+  const len = msg.length;
+  const hasNonGsm = msg.split('').some(c => { const cp = c.codePointAt(0); return cp > 127 && !'€£¥èéùìòÇØøÅåÆæßÉÄÖÑÜ§äöñüà'.includes(c); });
+  const segSize = hasNonGsm ? 70 : 160;
+  const concatSz = hasNonGsm ? 67 : 153;
+  const segs = len === 0 ? 1 : (len <= segSize ? 1 : Math.ceil(len / concatSz));
+  const el = document.getElementById('bulk-chars');
+  el.textContent = \`\${len} tecken · \${segs} SMS per mottagare\${hasNonGsm ? ' ⚠ Unicode' : ''}\`;
+  el.className = 'char-counter' + (len > segSize ? ' warn' : '') + (len > 1600 ? ' over' : '');
+  updateBulkPreview();
+}
+
+function updateBulkPreview() {
+  const nums = parseBulkNumbers(document.getElementById('bulk-numbers').value);
+  const msg  = document.getElementById('bulk-message').value;
+  const prev = document.getElementById('bulk-preview');
+  const txt  = document.getElementById('bulk-preview-text');
+  if (!nums.length || !msg.trim()) { prev.style.display = 'none'; return; }
+  const len = msg.length;
+  const segs = len <= 160 ? 1 : Math.ceil(len / 153);
+  txt.textContent = \`\${nums.length} mottagare × \${segs} SMS = \${nums.length * segs} SMS totalt\`;
+  prev.style.display = '';
+}
+
+function clearBulkList() {
+  document.getElementById('bulk-numbers').value = '';
+  document.getElementById('bulk-count-label').textContent = '';
+  document.getElementById('bulk-preview').style.display = 'none';
+}
+
+function parseBulkCsv(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const text = e.target.result;
+    const lines = text.split(/\\r?\\n/);
+    let col = 0;
+    const header = lines[0].split(/[,;\\t]/);
+    const phoneCol = header.findIndex(h => /phone|number|tel|mobil|nummer/i.test(h.trim()));
+    if (phoneCol >= 0) col = phoneCol;
+    const numbers = lines.slice(phoneCol >= 0 ? 1 : 0)
+      .map(l => l.split(/[,;\\t]/)[col]?.trim().replace(/['"/]/g,'') || '')
+      .filter(Boolean);
+    const existing = document.getElementById('bulk-numbers').value.trim();
+    document.getElementById('bulk-numbers').value = (existing ? existing + '\n' : '') + numbers.join('\n');
+    updateBulkCount();
+    toast('CSV importerad', \`\${numbers.length} rader inlästa\`);
+  };
+  reader.readAsText(file);
+  input.value = '';
+}
+
+async function startBulkSms(btn) {
+  const raw     = document.getElementById('bulk-numbers').value;
+  const message = document.getElementById('bulk-message').value.trim();
+  const provider = document.getElementById('bulk-provider').value;
+  const delayMs  = parseInt(document.getElementById('bulk-delay').value) || 500;
+  const numbers  = parseBulkNumbers(raw);
+
+  if (!numbers.length) { toast('Inga giltiga nummer', 'Klistra in E.164-nummer (+46...)', 'error'); return; }
+  if (!message)        { toast('Skriv ett meddelande', '', 'error'); return; }
+  if (!confirm(\`Skicka SMS till \${numbers.length} mottagare?\\n\\nMeddelande: \${message.slice(0,80)}\${message.length>80?'…':''}\`)) return;
+
+  document.getElementById('bulk-result-card').style.display = 'none';
+
+  await withLoading(btn, async () => {
+    const res = await api('/sms/bulk', 'POST', { numbers, message, provider, delayMs });
+    if (!res || res._err) { toast('Nätverksfel', '', 'error'); return; }
+    if (!res.ok)          { toast('Fel', res.error, 'error'); return; }
+
+    const inv = res.invalid?.length ? \` · \${res.invalid.length} ogiltiga\` : '';
+    toast('Kampanj startad', \`\${res.total} SMS köas\${inv}\`);
+    showMsg('bulk-status', \`\${res.total} SMS skickas...\`, true);
+
+    const card = document.getElementById('bulk-result-card');
+    document.getElementById('bulk-result-stats').innerHTML = \`
+      <div class="stat-card"><div class="stat-header"><span class="stat-label">Totalt köade</span></div><div class="stat-value accent">\${res.total}</div></div>
+      <div class="stat-card"><div class="stat-header"><span class="stat-label">Ogiltiga nummer</span></div><div class="stat-value" style="color:var(--yellow)">\${res.invalid?.length||0}</div></div>
+      <div class="stat-card"><div class="stat-header"><span class="stat-label">Fördröjning</span></div><div class="stat-value" style="color:var(--muted2)">\${delayMs}ms</div></div>
+    \`;
+    card.style.display = '';
+  });
+}
+
+// ── Android Connection Test ────────────────────────────────────────────────────
+
+async function testAndroidConnection(btn) {
+  const resultEl = document.getElementById('android-test-result');
+  const detailEl = document.getElementById('android-test-detail');
+  resultEl.textContent = '🔄 Testar...';
+  resultEl.style.color = 'var(--muted2)';
+  detailEl.style.display = 'none';
+  btn.disabled = true;
+  try {
+    const res = await api('/sms/device');
+    btn.disabled = false;
+    if (!res || res._err) {
+      resultEl.textContent = '✗ Nätverksfel';
+      resultEl.style.color = 'var(--red)';
+      return;
+    }
+    const d = res.device;
+    if (!d) {
+      resultEl.textContent = '✗ ANDROID_GATEWAY_URL inte satt i .env';
+      resultEl.style.color = 'var(--red)';
+      return;
+    }
+    if (!d.online) {
+      resultEl.textContent = '✗ Telefon ej nåbar';
+      resultEl.style.color = 'var(--red)';
+      detailEl.textContent = d.status ? \`HTTP \${d.status}\` : 'Timeout eller nätverksfel';
+      detailEl.style.display = '';
+      return;
+    }
+    resultEl.textContent = '✓ Ansluten!';
+    resultEl.style.color = 'var(--green)';
+    const info = [
+      d.model ? \`Modell: \${d.model}\` : '',
+      d.battery != null ? \`Batteri: \${d.battery}%\` : '',
+      d.android ? \`Android \${d.android}\` : '',
+    ].filter(Boolean).join(' · ');
+    if (info) { detailEl.textContent = info; detailEl.style.display = ''; }
+  } catch {
+    btn.disabled = false;
+    resultEl.textContent = '✗ Fel vid anslutning';
+    resultEl.style.color = 'var(--red)';
+  }
+}
+
 <\/script>
 </body>
 </html>`;

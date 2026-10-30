@@ -6,3 +6,11 @@ test-output/
 *.mulaw
 *.wav
 .fly/
+
+# Auto-added: cache & build artifacts
+.playwright-mcp/
+__pycache__/
+.venv/
+*.pyc
+.env.local
+.DS_Store
