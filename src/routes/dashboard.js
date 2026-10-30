@@ -206,6 +206,23 @@ tr:hover td{background:rgba(255,255,255,.015)}
 .modal-close{background:var(--surface2);border:1px solid var(--border);border-radius:7px;color:var(--muted2);font-size:14px;cursor:pointer;padding:5px 9px;transition:all .15s}
 .modal-close:hover{color:var(--text);border-color:var(--muted)}
 .modal-body{padding:20px 24px}
+/* SMS thread chat */
+.sms-thread{display:flex;flex-direction:column;gap:8px;padding:4px 0}
+.sms-bubble-wrap{display:flex;flex-direction:column;max-width:78%}
+.sms-bubble-wrap.out{align-self:flex-end;align-items:flex-end}
+.sms-bubble-wrap.in{align-self:flex-start;align-items:flex-start}
+.sms-bubble{padding:10px 14px;border-radius:14px;font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+.sms-bubble-wrap.out .sms-bubble{background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+.sms-bubble-wrap.in  .sms-bubble{background:var(--surface2);border:1px solid var(--border);color:var(--text);border-bottom-left-radius:4px}
+.sms-bubble-time{font-size:10px;color:var(--muted);margin-top:3px;padding:0 2px}
+.sms-contact-bar{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;margin-bottom:16px}
+.sms-contact-avatar{width:38px;height:38px;border-radius:50%;background:var(--accent-bg);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.sms-contact-name{font-weight:700;font-size:14px}
+.sms-contact-phone{font-size:11px;color:var(--muted);font-family:monospace}
+.sms-contact-co{font-size:11px;color:var(--muted2)}
+/* phone number link in table */
+.phone-link{color:var(--accent2);cursor:pointer;text-decoration:underline;text-underline-offset:2px;font-family:monospace}
+.phone-link:hover{color:var(--accent)}
 .msg{padding:10px 14px;border-radius:8px;margin-bottom:8px;font-size:13px;line-height:1.55;max-width:85%}
 .msg.user{background:var(--surface2);border:1px solid var(--border);margin-left:auto}
 .msg.assistant{background:var(--accent-bg);border:1px solid rgba(124,109,250,.2)}
@@ -932,6 +949,25 @@ kbd{background:var(--surface2);border:1px solid var(--border2);border-radius:4px
   </div>
 </div>
 
+<!-- SMS Thread Modal -->
+<div class="modal-overlay" id="sms-thread-modal" onclick="if(event.target===this)closeSmsThread()">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <div><h3 id="sms-thread-title">Konversation</h3><div class="modal-meta" id="sms-thread-meta"></div></div>
+      <button class="modal-close" onclick="closeSmsThread()">✕ Stäng</button>
+    </div>
+    <div class="modal-body">
+      <div id="sms-thread-contact"></div>
+      <div class="sms-thread" id="sms-thread-body">
+        <div style="text-align:center;color:var(--muted);padding:32px"><span class="spinner"></span></div>
+      </div>
+      <div id="sms-thread-more" style="display:none;text-align:center;margin-top:12px">
+        <button class="btn btn-ghost btn-sm" onclick="loadMoreThread()">↑ Ladda fler</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const BASE = '';
 let TOKEN = '';
@@ -1557,7 +1593,7 @@ async function startSse() {
       if (tbody && document.getElementById('page-smslog')?.classList.contains('active')) {
         const ts = new Date(evt.data?.ts || Date.now()).toLocaleString('sv-SE', { hour12: false }).slice(0, 16);
         const tr = document.createElement('tr');
-        tr.innerHTML = \`<td>\${ts}</td><td>← In</td><td style="font-family:monospace">\${esc(from)}</td><td>\${esc(msg.slice(0,60))}\${msg.length>60?'…':''}</td><td><span class="badge badge-green">received</span></td><td><span class="badge badge-green">Android</span></td>\`;
+        tr.innerHTML = \`<td>\${ts}</td><td>← In</td><td><span class="phone-link" onclick="openSmsThread('\${esc(from)}')">\${esc(from)}</span></td><td>\${esc(msg.slice(0,60))}\${msg.length>60?'…':''}</td><td><span class="badge badge-green">received</span></td><td><span class="badge badge-green">Android</span></td>\`;
         if (tbody.querySelector('.empty-row, .loading-row')) tbody.innerHTML = '';
         tbody.prepend(tr);
       }
@@ -1822,12 +1858,13 @@ async function loadSmsLog() {
   };
 
   tbody.innerHTML = res.sms.map(r => {
-    const ts   = new Date(r.created_at).toLocaleString('sv-SE', { hour12: false }).slice(0, 16);
-    const dir  = r.direction === 'in' ? '← In' : '→ Ut';
-    const num  = esc(r.direction === 'in' ? (r.phone_from||'?') : (r.phone_to||'?'));
-    const msg  = esc((r.message||'').slice(0, 60)) + (r.message?.length > 60 ? '…' : '');
-    const prov = r.provider === 'android' ? '<span class="badge badge-green">Android</span>' : r.provider === 'telnyx' ? '<span class="badge badge-blue">Telnyx</span>' : '<span class="badge badge-gray">–</span>';
-    return \`<tr><td>\${ts}</td><td>\${dir}</td><td style="font-family:monospace">\${num}</td><td>\${msg}</td><td>\${statusBadge(r.status)}</td><td>\${prov}</td></tr>\`;
+    const ts    = new Date(r.created_at).toLocaleString('sv-SE', { hour12: false }).slice(0, 16);
+    const dir   = r.direction === 'in' ? '← In' : '→ Ut';
+    const raw   = r.direction === 'in' ? (r.phone_from||'') : (r.phone_to||'');
+    const num   = raw ? \`<span class="phone-link" onclick="openSmsThread('\${esc(raw)}')">\${esc(raw)}</span>\` : '?';
+    const msg   = esc((r.message||'').slice(0, 60)) + (r.message?.length > 60 ? '…' : '');
+    const prov  = r.provider === 'android' ? '<span class="badge badge-green">Android</span>' : r.provider === 'telnyx' ? '<span class="badge badge-blue">Telnyx</span>' : '<span class="badge badge-gray">–</span>';
+    return \`<tr><td>\${ts}</td><td>\${dir}</td><td>\${num}</td><td>\${msg}</td><td>\${statusBadge(r.status)}</td><td>\${prov}</td></tr>\`;
   }).join('');
 }
 
@@ -1860,6 +1897,88 @@ async function removeOptOut(phone) {
   const res = await api('/sms/opted-out/' + encodeURIComponent(phone), 'DELETE');
   if (res?.ok) { toast('Opt-out borttagen', phone); loadOptOut(); }
   else toast('Fel', res?.error || '', 'error');
+}
+
+// ── SMS Thread ─────────────────────────────────────────────────────────────────
+
+let _threadPhone   = '';
+let _threadOffset  = 0;
+const THREAD_LIMIT = 50;
+
+async function openSmsThread(phone) {
+  _threadPhone  = phone;
+  _threadOffset = 0;
+  document.getElementById('sms-thread-title').textContent = phone;
+  document.getElementById('sms-thread-meta').textContent  = '';
+  document.getElementById('sms-thread-contact').innerHTML = '';
+  document.getElementById('sms-thread-body').innerHTML    = '<div style="text-align:center;color:var(--muted);padding:32px"><span class="spinner"></span></div>';
+  document.getElementById('sms-thread-more').style.display = 'none';
+  document.getElementById('sms-thread-modal').classList.add('open');
+
+  // CRM lookup + messages in parallel
+  const [crmRes, msgRes] = await Promise.all([
+    api('/sms/crm?phone=' + encodeURIComponent(phone)),
+    api(\`/sms/logs?phone=\${encodeURIComponent(phone)}&limit=\${THREAD_LIMIT}&offset=0\`),
+  ]);
+
+  if (crmRes?.ok && crmRes.contact) {
+    const c = crmRes.contact;
+    document.getElementById('sms-thread-title').textContent = c.name || phone;
+    document.getElementById('sms-thread-meta').textContent  = phone;
+    document.getElementById('sms-thread-contact').innerHTML = \`
+      <div class="sms-contact-bar">
+        <div class="sms-contact-avatar">👤</div>
+        <div>
+          <div class="sms-contact-name">\${esc(c.name || phone)}</div>
+          \${c.company ? \`<div class="sms-contact-co">\${esc(c.company)}</div>\` : ''}
+          <div class="sms-contact-phone">\${esc(phone)}</div>
+        </div>
+        \${c.email ? \`<div style="margin-left:auto;font-size:11px;color:var(--muted2)">\${esc(c.email)}</div>\` : ''}
+      </div>\`;
+  }
+
+  _threadOffset = renderThreadMessages(msgRes?.sms || [], true);
+  if ((msgRes?.sms || []).length === THREAD_LIMIT) {
+    document.getElementById('sms-thread-more').style.display = '';
+  }
+}
+
+async function loadMoreThread() {
+  const res = await api(\`/sms/logs?phone=\${encodeURIComponent(_threadPhone)}&limit=\${THREAD_LIMIT}&offset=\${_threadOffset}\`);
+  const msgs = res?.sms || [];
+  _threadOffset += renderThreadMessages(msgs, false);
+  if (msgs.length < THREAD_LIMIT) document.getElementById('sms-thread-more').style.display = 'none';
+}
+
+function renderThreadMessages(msgs, replace) {
+  const body = document.getElementById('sms-thread-body');
+  if (!msgs.length) {
+    if (replace) body.innerHTML = '<div style="text-align:center;color:var(--muted);padding:32px">Inga meddelanden</div>';
+    return 0;
+  }
+  // msgs comes newest-first; show oldest-first in thread
+  const sorted = [...msgs].reverse();
+  const html = sorted.map(r => {
+    const isOut = r.direction === 'out';
+    const ts    = new Date(r.created_at).toLocaleString('sv-SE', { hour12: false }).slice(0, 16);
+    const prov  = r.provider ? \`<span style="font-size:9px;color:var(--muted)"> · \${esc(r.provider)}</span>\` : '';
+    return \`<div class="sms-bubble-wrap \${isOut ? 'out' : 'in'}">
+      <div class="sms-bubble">\${esc(r.message || '')}</div>
+      <div class="sms-bubble-time">\${ts}\${prov}</div>
+    </div>\`;
+  }).join('');
+
+  if (replace) {
+    body.innerHTML = html;
+    body.scrollTop = body.scrollHeight;
+  } else {
+    body.insertAdjacentHTML('afterbegin', html);
+  }
+  return msgs.length;
+}
+
+function closeSmsThread() {
+  document.getElementById('sms-thread-modal').classList.remove('open');
 }
 
 // ── Bulk SMS ──────────────────────────────────────────────────────────────────

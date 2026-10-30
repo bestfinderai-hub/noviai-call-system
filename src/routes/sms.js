@@ -213,6 +213,25 @@ router.delete('/opted-out/:phone', apiLimiter, requireToken, async (req, res) =>
   res.json({ ok: true });
 });
 
+// ── CRM lookup — find contact in shared leads table ───────────────────────────
+
+router.get('/crm', apiLimiter, requireToken, async (req, res) => {
+  const phone = (req.query.phone || '').replace(/\s/g, '');
+  if (!phone || !/^\+\d{7,15}$/.test(phone)) {
+    return res.status(400).json({ error: 'Invalid phone (E.164 required)' });
+  }
+  try {
+    const { rows } = await query(
+      `SELECT name, company, email FROM leads WHERE phone = $1 LIMIT 1`,
+      [phone]
+    );
+    res.json({ ok: true, contact: rows[0] || null });
+  } catch (_err) {
+    // leads table may not exist in this DB — return null gracefully
+    res.json({ ok: true, contact: null });
+  }
+});
+
 // ── Incoming webhook (from Android gateway) ───────────────────────────────────
 
 router.post('/webhook', express.json({ limit: '64kb' }), async (req, res) => {
