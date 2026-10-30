@@ -16,6 +16,7 @@ const { timingSafeEqual } = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { query } = require('../db');
 const { sendSms, getDeviceHealth, saveIncomingSms, optOut, optIn, listOptedOut } = require('../services/sms');
+const { publish } = require('../features/events');
 
 const router = express.Router();
 
@@ -231,8 +232,10 @@ router.post('/webhook', express.json({ limit: '64kb' }), async (req, res) => {
 
   res.json({ ok: true });
 
-  await saveIncomingSms(sender, process.env.SMS_FROM_NUMBER || '', message.slice(0, 1600), 'android');
-  console.log(`[SMS] Incoming from ${sender.slice(-4)}: ${message.slice(0, 50)}`);
+  const clean = message.slice(0, 1600);
+  await saveIncomingSms(sender, process.env.SMS_FROM_NUMBER || '', clean, 'android');
+  publish('sms_in', { from: sender, message: clean.slice(0, 100), ts: new Date().toISOString() });
+  console.log(`[SMS] Incoming from ${sender.slice(-4)}: ${clean.slice(0, 50)}`);
 });
 
 module.exports = { router };

@@ -5,6 +5,7 @@ const { createVerify, createPublicKey } = require('crypto');
 const rateLimit = require('express-rate-limit');
 const router    = express.Router();
 const { saveIncomingSms } = require('./services/sms');
+const { publish } = require('./features/events');
 
 const TELNYX_BASE = 'https://api.telnyx.com/v2';
 
@@ -308,8 +309,10 @@ function createWebhookRouter(sessions, callMeta) {
           break;
         case 'message.received': {
           const { from, to, text } = payload;
-          await saveIncomingSms(from?.phone_number || from, to?.[0]?.phone_number || to, text, 'telnyx');
-          console.log(`[Webhook] Incoming SMS from ${(from?.phone_number || from || '').slice(-4)}`);
+          const sender = from?.phone_number || from || '';
+          await saveIncomingSms(sender, to?.[0]?.phone_number || to, text, 'telnyx');
+          publish('sms_in', { from: sender, message: (text || '').slice(0, 100), ts: new Date().toISOString() });
+          console.log(`[Webhook] Incoming SMS from ${sender.slice(-4)}`);
           break;
         }
         default:

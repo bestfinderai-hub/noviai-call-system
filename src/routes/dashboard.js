@@ -1544,6 +1544,24 @@ async function startSse() {
       badge.textContent = cnt;
       if (!cnt) badge.style.display = 'none';
     }
+    if (evt.type === 'sms_in') {
+      const from = evt.data?.from || 'okänt nummer';
+      const msg  = evt.data?.message || '';
+      toast('📩 Inkommande SMS', \`\${from}: \${msg.slice(0, 60)}\${msg.length > 60 ? '…' : ''}\`, 'info');
+      // bump badge
+      const smsBadge = document.getElementById('sms-badge');
+      smsBadge.textContent = (parseInt(smsBadge.textContent || '0') + 1).toString();
+      smsBadge.style.display = '';
+      // live-prepend row if SMS log is open
+      const tbody = document.getElementById('smslog-body');
+      if (tbody && document.getElementById('page-smslog')?.classList.contains('active')) {
+        const ts = new Date(evt.data?.ts || Date.now()).toLocaleString('sv-SE', { hour12: false }).slice(0, 16);
+        const tr = document.createElement('tr');
+        tr.innerHTML = \`<td>\${ts}</td><td>← In</td><td style="font-family:monospace">\${esc(from)}</td><td>\${esc(msg.slice(0,60))}\${msg.length>60?'…':''}</td><td><span class="badge badge-green">received</span></td><td><span class="badge badge-green">Android</span></td>\`;
+        if (tbody.querySelector('.empty-row, .loading-row')) tbody.innerHTML = '';
+        tbody.prepend(tr);
+      }
+    }
   };
 }
 
@@ -1551,9 +1569,12 @@ function appendEventFeed(evt) {
   const feed = document.getElementById('event-feed');
   if (!feed) return;
   const ts = new Date(evt.ts).toLocaleTimeString('sv-SE');
-  const color = evt.type.startsWith('call.') ? 'var(--accent2)' : 'var(--muted)';
+  const color = evt.type.startsWith('call.') ? 'var(--accent2)' : evt.type === 'sms_in' ? 'var(--green)' : 'var(--muted)';
   const line = document.createElement('div');
-  line.innerHTML = \`<span style="color:var(--muted)">\${ts}</span> <span style="color:\${color}">\${esc(evt.type)}</span> \${evt.data?.callId ? '<span style="color:var(--muted)">…'+esc(evt.data.callId.slice(-6))+'</span>' : ''}\${evt.data?.from?' <span style="color:var(--blue)">'+esc(evt.data.from)+'</span>':''}\`;
+  const extra = evt.type === 'sms_in'
+    ? \` <span style="color:var(--blue)">\${esc(evt.data?.from||'')}</span> <span style="color:var(--muted)">\${esc((evt.data?.message||'').slice(0,40))}</span>\`
+    : \`\${evt.data?.callId ? ' <span style="color:var(--muted)">…'+esc(evt.data.callId.slice(-6))+'</span>' : ''}\${evt.data?.from?' <span style="color:var(--blue)">'+esc(evt.data.from)+'</span>':''}\`;
+  line.innerHTML = \`<span style="color:var(--muted)">\${ts}</span> <span style="color:\${color}">\${esc(evt.type)}</span>\${extra}\`;
   if (feed.firstChild?.textContent === '— väntar på händelser —') feed.innerHTML = '';
   feed.appendChild(line);
   feed.scrollTop = feed.scrollHeight;
