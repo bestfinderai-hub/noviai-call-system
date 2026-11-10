@@ -1,7 +1,7 @@
 'use strict';
 
 // TTS provider factory — selects implementation based on TTS_PROVIDER env var.
-// Providers: edge (default/free), elevenlabs (~75ms, paid), cartesia (~60ms, paid)
+// Providers: edge (default/free), google (gratis 1M tecken/mån), elevenlabs (~75ms, paid), cartesia (~60ms, paid)
 //
 // Interface every provider must export:
 //   streamToWebSocket(text, telnyxWs) → { promise, cancel(), byteLength }
@@ -11,8 +11,12 @@ const { stripMarkdown } = require('../../services/speech');
 
 const PROVIDERS = {
   edge:        () => require('./edge'),
+  google:      () => require('./google'),
   elevenlabs:  () => require('./elevenlabs'),
   cartesia:    () => require('./cartesia'),
+  f5tts:       () => require('./f5tts'),
+  xtts:        () => require('./xtts'),
+  chatterbox:  () => require('./chatterbox'),
 };
 
 function getProvider(name) {
