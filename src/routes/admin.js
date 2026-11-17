@@ -23,9 +23,13 @@
 //   GET  /admin/batch-calls
 //   GET  /admin/batch-calls/:batchId
 //   DELETE /admin/batch-calls/:batchId
+//   GET  /admin/recordings[?limit=N&offset=M]
+//   DELETE /admin/recordings/:filename
 
 const express    = require('express');
 const { timingSafeEqual } = require('crypto');
+const fs         = require('fs');
+const path       = require('path');
 const rateLimit  = require('express-rate-limit');
 const { query }  = require('../db');
 const { clearPromptCache } = require('../providers/llm');
@@ -680,26 +684,27 @@ router.patch('/calls/:callId/lead', async (req, res) => {
 
 // ── GET /admin/recordings ─────────────────────────────────────────────────────
 
-router.get('/recordings', (req, res) => {
+router.get('/recordings', (_req, res) => {
   const dir = process.env.RECORDINGS_DIR || './recordings';
-  const fs = require('fs');
-  const path = require('path');
+  const limit  = Math.min(parseInt(_req.query.limit  || '100', 10), 500);
+  const offset = Math.max(parseInt(_req.query.offset || '0',   10), 0);
 
   if (!fs.existsSync(dir)) {
-    return res.json({ recordings: [], dir, enabled: process.env.RECORDING_ENABLED === 'true' });
+    return res.json({ recordings: [], count: 0, total: 0, dir, enabled: process.env.RECORDING_ENABLED === 'true' });
   }
 
   try {
-    const files = fs.readdirSync(dir)
+    const all = fs.readdirSync(dir)
       .filter(f => /\.(mp3|wav|ogg|webm|opus)$/i.test(f))
       .map(f => {
         const full = path.join(dir, f);
         const stat = fs.statSync(full);
-        return { filename: f, sizeBytes: stat.size, createdAt: stat.birthtime.toISOString() };
+        return { filename: f, sizeBytes: stat.size, createdAt: stat.mtime.toISOString() };
       })
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-    res.json({ recordings: files, count: files.length, dir, enabled: process.env.RECORDING_ENABLED === 'true' });
+    const page = all.slice(offset, offset + limit);
+    res.json({ recordings: page, count: page.length, total: all.length, dir, enabled: process.env.RECORDING_ENABLED === 'true' });
   } catch (err) {
     console.error('[Admin] Recordings list error:', err.message);
     res.status(500).json({ error: 'Could not list recordings' });
@@ -710,8 +715,6 @@ router.get('/recordings', (req, res) => {
 
 router.delete('/recordings/:filename', (req, res) => {
   const dir = process.env.RECORDINGS_DIR || './recordings';
-  const fs = require('fs');
-  const path = require('path');
 
   const filename = path.basename(req.params.filename || '');
   if (!filename || !/^[\w.-]+$/.test(filename)) {
