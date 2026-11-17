@@ -1,0 +1,14 @@
+{
+  "id": "bestfinder/chatterbox-tts-server",
+  "title": "Chatterbox TTS Server",
+  "code_file": "kaggle_server.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_tpu": false,
+  "enable_internet": true,
+  "dataset_sources": [],
+  "competition_sources": [],
+  "kernel_sources": []
+}
