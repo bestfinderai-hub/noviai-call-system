@@ -11,6 +11,7 @@ const { saveCallReport }    = require('./features/call-report');
 const { detectVoicemail }   = require('./features/voicemail');
 const { classifySentiment } = require('./features/sentiment');
 const { saveRecording }     = require('./features/recording');
+const { injectBackchannel } = require('./features/backchannel');
 const {
   getTools, buildToolsPrompt, parseToolCalls, stripToolCalls, executeTool,
 } = require('./features/tools');
@@ -82,6 +83,9 @@ class CallSession extends EventEmitter {
 
     // Greedy TTS pipeline — true while streaming sentences from LLM to TTS back-to-back
     this._ttsStreaming    = false;
+
+    // Backchannel timer — fires 220ms after processing starts if LLM is slow
+    this._backchannelTimer = null;
 
     // Deepgram live STT session (null when using batch Groq path)
     this._deepgramLive    = null;
@@ -326,7 +330,7 @@ class CallSession extends EventEmitter {
 
   // ── Turn processing ───────────────────────────────────────────────────────────
 
-  async _processTurn() {
+  async _processTurn(allowSemanticExtend = true) {
     if (this.state === 'processing') return;
     this.state = 'processing';
 
@@ -354,6 +358,21 @@ class CallSession extends EventEmitter {
         return;
       }
 
+      // Semantic endpointing — extend listen window if transcript looks mid-sentence.
+      // Allowed once per turn (allowSemanticExtend=false on retry prevents infinite loop).
+      if (allowSemanticExtend && !this._isTranscriptComplete(transcript)) {
+        const extendMs = parseInt(process.env.SEMANTIC_EXTEND_MS || '600', 10);
+        console.log(`[Session:${this._id()}] Transcript incomplete — extending ${extendMs}ms ("${transcript.slice(0, 40)}")`);
+        this.state = 'listening';
+        this.hasSpoken = true;
+        this.audioChunks = [];
+        this.silenceTimer = setTimeout(() => {
+          this.silenceTimer = null;
+          this._processTurn(false); // process regardless this time
+        }, extendMs);
+        return;
+      }
+
       await this._processTurnFromText(transcript, t0);
 
     } catch (err) {
@@ -366,6 +385,16 @@ class CallSession extends EventEmitter {
   async _processTurnFromText(userText, t0 = Date.now()) {
     // Ensure state = processing (DTMF path doesn't go through _processTurn)
     this.state = 'processing';
+
+    // Backchannel — inject "mm"/"jaa" etc. if LLM takes > 220ms to reply.
+    // Timer is cancelled when first LLM sentence is queued (fast path).
+    clearTimeout(this._backchannelTimer);
+    this._backchannelTimer = setTimeout(() => {
+      this._backchannelTimer = null;
+      if (this.state === 'processing' && this.ws.readyState === WebSocket.OPEN) {
+        injectBackchannel(this.ws);
+      }
+    }, parseInt(process.env.BACKCHANNEL_DELAY_MS || '220', 10));
 
     // 2. IVR/voicemail detection — first 3 real turns (phone queues often reveal
     //    themselves on turn 2-3: "Alla operatörer är upptagna, väntetid 5 min")
@@ -407,9 +436,16 @@ class CallSession extends EventEmitter {
     // Promise chain: each sentence is appended and plays after the previous finishes.
     // LLM continues generating while sentence N is being sent to Telnyx.
     let speakChain = Promise.resolve();
+    let _firstLlmToken = true;
 
     try {
       for await (const sentence of chatStream(this.history, this._systemPrompt)) {
+        // Cancel backchannel timer — LLM fast enough, no filler needed
+        if (_firstLlmToken) {
+          _firstLlmToken = false;
+          clearTimeout(this._backchannelTimer);
+          this._backchannelTimer = null;
+        }
         rawOutput += (rawOutput ? ' ' : '') + sentence;
 
         if (sentence.includes('<tool_call>')) {
@@ -638,6 +674,27 @@ class CallSession extends EventEmitter {
     }
   }
 
+  // ── Semantic endpointing ──────────────────────────────────────────────────────
+
+  _isTranscriptComplete(text) {
+    const t = text.trim();
+    if (t.length < 5) return true;
+    if (/[.!?]$/.test(t)) return true;
+
+    // Trailing word is a conjunction or preposition — user likely mid-sentence
+    const lastWord = t.split(/\s+/).pop().toLowerCase().replace(/[^a-zåäö]/g, '');
+    const incomplete = new Set([
+      'och', 'men', 'eller', 'att', 'om', 'för', 'så', 'när', 'då',
+      'fast', 'även', 'bara', 'inte', 'är', 'det', 'en', 'ett', 'med', 'på',
+    ]);
+    if (incomplete.has(lastWord)) return false;
+
+    // Ends with digit (phone number, amount being dictated)
+    if (/\d$/.test(t)) return false;
+
+    return true;
+  }
+
   // ── Barge-in ──────────────────────────────────────────────────────────────────
 
   _handleBargein(firstChunk) {
@@ -758,6 +815,8 @@ class CallSession extends EventEmitter {
 
     clearTimeout(this._maxTimer);
     clearTimeout(this.silenceTimer);
+    clearTimeout(this._backchannelTimer);
+    this._backchannelTimer = null;
     this._clearIdleTimers();
     if (this._cancelTts) this._cancelTts();
     this._ttsStreaming = false;
