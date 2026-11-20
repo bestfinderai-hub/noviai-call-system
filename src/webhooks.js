@@ -1,7 +1,7 @@
 'use strict';
 
 const express   = require('express');
-const { createVerify, createPublicKey } = require('crypto');
+const { verify: cryptoVerify, createPublicKey } = require('crypto');
 const rateLimit = require('express-rate-limit');
 const router    = express.Router();
 const { saveIncomingSms } = require('./services/sms');
@@ -38,9 +38,9 @@ function verifyTelnyxSignature(rawBody, signature, timestamp) {
     const keyBytes = Buffer.from(pubKeyB64, 'base64');
     const derKey   = Buffer.concat([prefix, keyBytes]);
     const publicKey = createPublicKey({ key: derKey, format: 'der', type: 'spki' });
-    const verifier  = createVerify('Ed25519');
-    verifier.update(signedPayload);
-    return verifier.verify(publicKey, sig);
+    // crypto.verify(null, ...) krävs för Ed25519 i Node.js v18+ / OpenSSL 3.x
+    // createVerify('Ed25519') ger "Invalid digest" på nyare Node.js-versioner
+    return cryptoVerify(null, signedPayload, publicKey, sig);
   } catch (err) {
     console.error('[Webhook] Signature verification error:', err.message);
     return false;
@@ -122,21 +122,19 @@ async function handleCallInitiated(payload, callMeta) {
   if (direction === 'incoming') {
     console.log(`[Webhook] Answering inbound call: ${cid.slice(-8)} from=${from}`);
     await telnyxAction(cid, 'answer', {});
-    await startAudioStream(cid);
+    // streaming_start sent in call.answered to avoid race with answer confirmation
   } else {
-    // Outgoing: we wait for call.answered before streaming
     console.log(`[Webhook] Outbound call initiated: ${cid.slice(-8)} to=${to}`);
   }
 }
 
 async function handleCallAnswered(payload, sessions, callMeta) {
-  const { call_control_id: cid, direction } = payload;
+  const { call_control_id: cid, direction, call_direction } = payload;
+  const dir = direction || call_direction || 'unknown';
 
-  if (direction === 'outgoing') {
-    // Start streaming now that remote party answered
-    console.log(`[Webhook] Outbound answered: ${cid.slice(-8)}`);
-    await startAudioStream(cid);
-  }
+  // Start streaming for both inbound and outbound — always after call.answered
+  console.log(`[Webhook] Call answered (${dir}): ${cid.slice(-8)}`);
+  await startAudioStream(cid);
 
   if (sessions.get(cid)) {
     console.log(`[Webhook] Call answered, session exists: ${cid.slice(-8)}`);
